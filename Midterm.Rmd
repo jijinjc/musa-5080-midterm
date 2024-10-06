@@ -9,6 +9,8 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+# Introduction
+
 ```{r library, include=FALSE}
 library(tidyverse)
 library(sf)
@@ -20,12 +22,15 @@ library(grid)
 library(gridExtra)
 library(ggcorrplot)
 library(dplyr)
+library(geojsonio)
 
 root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
 source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
 
 palette5 = c("#25CB10", "#5AB60C", "#8FA108",   "#C48C04", "#FA7800")
 ```
+
+# Data
 
 ```{r data, include=FALSE}
 studentdata = st_read("https://raw.githubusercontent.com/jijinjc/musa-5080-midterm/refs/heads/main/Midterm%20Data/studentData.geo.json") %>%
@@ -43,6 +48,26 @@ bikestations = st_read("https://raw.githubusercontent.com/jijinjc/musa-5080-midt
 crime = read.csv("https://raw.githubusercontent.com/jijinjc/musa-5080-midterm/refs/heads/main/Midterm%20Data/incidents_part1_part2.csv")
 ```
 
+|              Variable Name              |
+|:---------------------------------------:|
+| **Internal Characteristics (Numeric)**  |
+|              Age of House               |
+|          Total Number of Rooms          |
+|           Includes Basement?            |
+|              Includes A/C?              |
+|           Quality of building           |
+|              Building Type              |
+|            Includes Garage?             |
+|           Stories in Building           |
+|                  Area                   |
+|          Observable Sceneries           |
+|           **Public Service**            |
+|           Surrounding Crimes            |
+|          Nearby Transit Stops           |
+|          Distance to Hospitals          |
+|            Distance to Shops            |
+|       Nearby Private High School        |
+
 ```{r wrangle data, includ=FALSE}
 farmersmarket.f = farmermarket %>%
   select(globalid, name, operator, zip, objectid, geometry)
@@ -56,61 +81,79 @@ bikestations.f = bikestations %>%
   select(id, name, addressStreet, addressZipCode, latitude, longitude, coordinates, geometry)
 
 studentdata.f = studentdata %>%
-  dplyr::select(objectid, basements, geometry, census_tract, category_code, central_air, fireplaces, fuel, garage_type, interior_condition, location, number_of_bedrooms, number_of_bathrooms, number_stories, number_of_rooms, quality_grade, state_code, street_code, sale_price, sale_date, sale_year, total_livable_area, type_heater, total_area, unfinished, unit, view_type, year_built, zip_code, toPredict)
-  # mutate(hasBasements = case_when(
-  #         !is.na(basements) & basements != 0~ "Y", TRUE~ "N"),
-  #       hasAC = case_when(
-  #         central_air %in% c("1", "Y") ~ "Y",
-  #         TRUE~ "N"),
-  #       hasFireplace = case_when(
-  #         fireplaces == 0 | is.na(fireplaces)  ~ "N",
-  #         TRUE~ "Y"),
-  #       hasGarage = case_when(
-  #         garage_type == 0 | is.na(garage_type)  ~ "N",
-  #         TRUE~ "Y"),
-  #       age = 2023 - year_built,
-  #       interior_grade = case_when(
-  #         interior_condition >= 2 & interior_condition <= 4 ~ "GOOD",
-  #         interior_condition > 4 ~ "BAD",
-  #         TRUE ~ "NA"),
-  #       numRooms = case_when(
-  #          is.na(number_of_bedrooms) & !is.na(number_of_bedrooms) ~ number_of_bathrooms,
-  #          is.na(number_of_bathrooms) & !is.na(number_of_bedrooms) ~ number_of_bedrooms,
-  #          is.na(number_of_bathrooms) & is.na(number_of_bedrooms) ~ 0,
-  #          TRUE ~ number_of_bedrooms + number_of_bathrooms),
-  #       stories = case_when(
-  #          number_stories == 1  ~ "SINGLE",
-  #          number_stories == 2  ~ "DOUBLE",
-  #          TRUE~ "MULTIPLE"),
-  #       area = case_when(
-  #          total_livable_area > total_area ~ total_livable_area,
-  #          TRUE ~ total_area),
-  #       hasHeater = case_when(
-  #          type_heater == 0 | is.na(type_heater)  ~ "N",
-  #          TRUE~ "Y"),
-  #       view = case_when(
-  #          view_type == "I" | view_type == "0" | is.na(view_type)   ~ "STANDARD",
-  #          view_type == "A" | view_type == "B" | view_type == "C" ~ "GOOD",
-  #          TRUE~ "BELOW AVERAGE"),
-  #       quality = case_when(
-  #          quality_grade %in% c("4", "5", "6", "A", "A+", "A-", "B", "B+","B-","S","S+","X-")  ~ "Good",
-  #          TRUE~ "Bad"),
-  #       logarea = log(area)) 
+  dplyr::select(objectid, basements, geometry, census_tract, category_code, central_air, fireplaces, fuel, garage_type, interior_condition, location, number_of_bedrooms, number_of_bathrooms, number_stories, number_of_rooms, quality_grade, state_code, street_code, sale_price, sale_date, sale_year, total_livable_area, type_heater, total_area, unfinished, unit, view_type, year_built, zip_code, toPredict) %>%
+  mutate(incBasements = case_when(
+          !is.na(basements) & basements != 0~ "Y", TRUE~ "N"),
+        incAC = case_when(
+          central_air %in% c("1", "Y") ~ "Y",
+          TRUE~ "N"),
+        incGarage = case_when(
+          garage_type == 0 | is.na(garage_type)  ~ "N",
+          TRUE~ "Y"),
+        age = 2023 - year_built,
+        interiorQuality = case_when(
+          interior_condition >= 2 & interior_condition <= 4 ~ "GOOD",
+          interior_condition > 4 ~ "BAD",
+          TRUE ~ "NA"),
+        totRooms = case_when(
+           is.na(number_of_bedrooms) & !is.na(number_of_bedrooms) ~ number_of_bathrooms,
+           is.na(number_of_bathrooms) & !is.na(number_of_bedrooms) ~ number_of_bedrooms,
+           is.na(number_of_bathrooms) & is.na(number_of_bedrooms) ~ 0,
+           TRUE ~ number_of_bedrooms + number_of_bathrooms),
+        stories = case_when(
+           number_stories == 1  ~ "SINGLE",
+           TRUE~ "MULTIPLE"),
+        maxArea = case_when(
+           total_livable_area > total_area ~ total_livable_area,
+           TRUE ~ total_area),
+        incHeater = case_when(
+           type_heater == 0 | is.na(type_heater)  ~ "N",
+           TRUE~ "Y"),
+        scenery = case_when(
+           view_type == "I" | view_type == "0" | is.na(view_type)   ~ "STANDARD",
+           view_type == "A" | view_type == "B" | view_type == "C" ~ "GOOD",
+           TRUE~ "BELOW AVERAGE"),
+        buildingQuality = case_when(
+           quality_grade %in% c("3", "4", "5", "6", "A", "A+", "A-", "B", "B+","B-","S","S+","X-")  ~ "Good",
+           TRUE~ "Bad"))
 
 modellingdata = studentdata.f %>%
-  filter(toPredict == 'MODELLING') %>%
-  dplyr::select(-sale_price)
+  filter(toPredict == 'MODELLING') 
 
 challengedata = studentdata.f %>%
   filter(toPredict == 'CHALLENGE')
 ```
 
-```{r}
-for (k in c(5, 6, 7, 8, 9, 10, 15, 20)) {
-  nb_k <- knn2nb(knearneigh(st_coordinates(studentdata.f), k=k))
-  wt_k <- nb2listw(nb_k)
-  moran_test <- moran.test(studentdata.f$sale_price, wt_k)
-  print(paste("Moran's I for k =", k, ":"))
-  print(moran_test)
+```{r split data}
+set.seed(1111) 
+total_features = nrow(modellingdata)
+split_index = sample(1:total_features, size = total_features * 0.6)
+
+
+trainingmodel = modellingdata[split_index, ] 
+testingmodel = modellingdata[-split_index, ] %>%
+  select(-sale_price)
+```
+
+```{r decide moran/k, include=FALSE}
+moran_results = data.frame(K = integer(),
+                            Moran_I = numeric(),
+                            Expectation = numeric(),
+                            Variance = numeric(),
+                            Standard_Deviate = numeric())
+for (k in 5:20) {
+  nb_k = knn2nb(knearneigh(st_coordinates(studentdata.f), k=k))
+  wt_k = nb2listw(nb_k)
+  moran_test = moran.test(studentdata.f$sale_price, wt_k)
+  moran_I = moran_test$estimate[1]
+  expectation = moran_test$estimate[2]
+  variance = moran_test$estimate[3]
+  standard_deviate = moran_test$statistic
+  moran_results = rbind(moran_results, data.frame(K = k,
+                                                   Moran_I = moran_I,
+                                                   Expectation = expectation,
+                                                   Variance = variance,
+                                                   Standard_Deviate = standard_deviate))
 }
+print(moran_results)
 ```
