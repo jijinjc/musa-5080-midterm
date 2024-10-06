@@ -22,7 +22,8 @@ library(grid)
 library(gridExtra)
 library(ggcorrplot)
 library(dplyr)
-library(geojsonio)
+library(RColorBrewer)
+#library(geojsonio)
 
 root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
 source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
@@ -48,25 +49,23 @@ bikestations = st_read("https://raw.githubusercontent.com/jijinjc/musa-5080-midt
 crime = read.csv("https://raw.githubusercontent.com/jijinjc/musa-5080-midterm/refs/heads/main/Midterm%20Data/incidents_part1_part2.csv")
 ```
 
-|              Variable Name              |
-|:---------------------------------------:|
-| **Internal Characteristics (Numeric)**  |
-|              Age of House               |
-|          Total Number of Rooms          |
-|           Includes Basement?            |
-|              Includes A/C?              |
-|           Quality of building           |
-|              Building Type              |
-|            Includes Garage?             |
-|           Stories in Building           |
-|                  Area                   |
-|          Observable Sceneries           |
-|           **Public Service**            |
-|           Surrounding Crimes            |
-|          Nearby Transit Stops           |
-|          Distance to Hospitals          |
-|            Distance to Shops            |
-|       Nearby Private High School        |
+|              Variable              | Variable Name in Dataset |
+|:----------------------------------:|:------------------------:|
+|    **Internal Characteristics**    |                          |
+|            Age of House            |           age            |
+|       Total Number of Rooms        |         totRooms         |
+|         Includes Basement?         |       incBasements       |
+|           Includes A/C?            |          incAC           |
+|        Quality of building         |     buildingQuality      |
+|          Includes Garage?          |        incGarage         |
+|        Stories in Building         |         Stories           |
+|                Area                |         maxArea          |
+|        Observable Sceneries        |         scenery          |
+|        **Nearby Amenities**        |                          |
+|         Surrounding Crimes         |                          |
+|       Distance to Hospitals        |                          |
+| Distance to Nearest Farmers Market |                          |
+|     Nearby Private High School     |                          |
 
 ```{r wrangle data, includ=FALSE}
 farmersmarket.f = farmermarket %>%
@@ -76,6 +75,7 @@ hospital.f = hospital %>%
 parks.f = parks %>%
   select(OBJECTID, PARK_NAME, DPP_ASSET_ID, geometry)
 schools.f = schools %>%
+  filter(TYPE_SPECIFIC != "ARCHDIOCESE") %>% # Not everyone is religious, so we remove this option
   select(OBJECTID, AUN, SCHOOL_NAME, ZIP_CODE, geometry)
 bikestations.f = bikestations %>%
   select(id, name, addressStreet, addressZipCode, latitude, longitude, coordinates, geometry)
@@ -115,7 +115,33 @@ studentdata.f = studentdata %>%
            TRUE~ "BELOW AVERAGE"),
         buildingQuality = case_when(
            quality_grade %in% c("3", "4", "5", "6", "A", "A+", "A-", "B", "B+","B-","S","S+","X-")  ~ "Good",
-           TRUE~ "Bad"))
+           TRUE~ "Bad")) %>%
+  dplyr::select(-basements, -central_air, -garage_type, -interior_condition, -number_stories, -type_heater, -view_type, -quality_grade) %>%
+  filter(age >= 0)
+
+
+fm.idx = st_nearest_feature(studentdata.f, farmersmarket.f)
+hospital.idx = st_nearest_feature(studentdata.f, hospital.f)
+parks.idx = st_nearest_feature(studentdata.f, parks.f)
+
+# Calculate distances to the nearest features using the indices
+studentdata.f = studentdata.f %>%
+  mutate(
+    farmersmarket.d.ft = as.numeric(
+      st_distance(geometry, st_geometry(farmersmarket.f)[fm.idx], by_element = TRUE)),
+    hospital.d.ft = as.numeric(
+      st_distance(geometry, st_geometry(hospital.f)[hospital.idx], by_element = TRUE)),
+    parks.d.ft = as.numeric(
+      st_distance(geometry, st_geometry(parks.f)[parks.idx], by_element = TRUE)),
+    schools.c = lengths(
+      st_intersects(studentdata.f, st_buffer(schools.f, units::set_units(1.5, mile)))),
+    bikestations.c = lengths(
+      st_intersects(studentdata.f, st_buffer(bikestations.f, units::set_units(0.5, mile))))
+  )
+
+# group_by(schools, TYPE_SPECIFIC) %>%
+#   summarize(count = n()) %>%
+#   arrange(-count)
 
 modellingdata = studentdata.f %>%
   filter(toPredict == 'MODELLING') 
@@ -156,4 +182,28 @@ for (k in 5:20) {
                                                    Standard_Deviate = standard_deviate))
 }
 print(moran_results)
+ # K=7
+```
+
+```{r data summary corrmatrix, }
+corrvars <- 
+  studentdata.f %>% 
+  dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft)
+
+corrvar <- select_if(st_drop_geometry(corrvars), is.numeric) %>% 
+  na.omit()
+
+ggcorrplot(
+  round(cor(corrvar), 1), 
+  p.mat = cor_pmat(corrvar),
+  colors = c("#30003a", "white", "#063615"),
+  type="lower",
+  insig = "blank") +  
+  labs(title = "Correlation Matrix - All Numerical Variables") +
+  guides(fill = guide_legend(title = "Correlation")) +
+  theme(plot.title = element_text(size = 12, face = "bold"), 
+        axis.text.x = element_text(angle = 25, size = 6),
+        axis.text.y = element_text(size=6), 
+        axis.title = element_text(size=8),
+        axis.title.y = element_blank())
 ```
