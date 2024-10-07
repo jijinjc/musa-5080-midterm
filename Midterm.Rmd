@@ -207,3 +207,27 @@ ggcorrplot(
         axis.title = element_text(size=8),
         axis.title.y = element_blank())
 ```
+
+```{r variable summary dependent map}
+philly = st_read("https://opendata.arcgis.com/datasets/0960ea0f38f44146bb562f2b212075aa_0.geojson") %>%
+  st_transform('EPSG:6565') 
+
+ggplot()+
+    geom_sf(data=philly, fill='transparent',color='black', linewidth = 0.1) +
+    geom_sf(data = studentdata.f, size=0.75,aes(colour = q5(sale_price))) +
+    scale_color_manual(values = c('#ffffb2', '#c2e699', '#78c679', '#31a354', '#006837'),
+                    name = "Houses Sales Price",
+                    na.value = 'transparent',
+                    labels = c('< 250k', '250k-500k', '500k-750k', '750k-1mil', '1mil <')) +
+   theme(
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.title = element_blank(),
+        plot.title = element_text(size = 12, face = "bold"),
+        panel.background = element_blank(),
+        legend.background = element_rect(fill="grey90")
+        ) +
+  labs(title = "Distribution of Sale Price in Philadelphia") 
+```
