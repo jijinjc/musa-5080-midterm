@@ -23,12 +23,26 @@ library(gridExtra)
 library(ggcorrplot)
 library(dplyr)
 library(RColorBrewer)
+library(classInt)
+
 #library(geojsonio)
 
 root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
 source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
 
 palette5 = c("#25CB10", "#5AB60C", "#8FA108",   "#C48C04", "#FA7800")
+
+get_breaks <- function(sf_object, column_name, num_breaks, breaktype) {
+  if (!(column_name %in% colnames(sf_object))) {
+    stop("The specified column does not exist in the sf object.")
+  }
+  column_values <- sf_object[[column_name]]
+  if (!is.numeric(column_values)) {
+    stop("The specified column is not numeric.")
+  }
+  breaks <- classInt::classIntervals(column_values, n = num_breaks, style = breaktype)$brks
+  print(breaks)
+}
 ```
 
 # Data
@@ -58,14 +72,13 @@ crime = read.csv("https://raw.githubusercontent.com/jijinjc/musa-5080-midterm/re
 |           Includes A/C?            |          incAC           |
 |        Quality of building         |     buildingQuality      |
 |          Includes Garage?          |        incGarage         |
-|        Stories in Building         |         Stories           |
+|        Stories in Building         |         Stories          |
 |                Area                |         maxArea          |
 |        Observable Sceneries        |         scenery          |
 |        **Nearby Amenities**        |                          |
-|         Surrounding Crimes         |                          |
 |       Distance to Hospitals        |                          |
 | Distance to Nearest Farmers Market |                          |
-|     Nearby Private High School     |                          |
+|     Nearby Schools     |                          |
 
 ```{r wrangle data, includ=FALSE}
 farmersmarket.f = farmermarket %>%
@@ -117,7 +130,8 @@ studentdata.f = studentdata %>%
            quality_grade %in% c("3", "4", "5", "6", "A", "A+", "A-", "B", "B+","B-","S","S+","X-")  ~ "Good",
            TRUE~ "Bad")) %>%
   dplyr::select(-basements, -central_air, -garage_type, -interior_condition, -number_stories, -type_heater, -view_type, -quality_grade) %>%
-  filter(age >= 0)
+  filter(age >= 0) %>%
+  filter(age < 500)
 
 
 fm.idx = st_nearest_feature(studentdata.f, farmersmarket.f)
@@ -161,7 +175,7 @@ testingmodel = modellingdata[-split_index, ] %>%
   select(-sale_price)
 ```
 
-```{r decide moran/k, include=FALSE}
+```{r decide moran/k, include=FALSE, eval=FALSE}
 moran_results = data.frame(K = integer(),
                             Moran_I = numeric(),
                             Expectation = numeric(),
@@ -186,16 +200,15 @@ print(moran_results)
 ```
 
 ```{r data summary corrmatrix, }
-corrvars <- 
-  studentdata.f %>% 
-  dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft)
-
-corrvar <- select_if(st_drop_geometry(corrvars), is.numeric) %>% 
+corrvars = studentdata.f %>% 
+  dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft) %>%
+  st_drop_geometry() %>%
+  select_if(is.numeric) %>% 
   na.omit()
 
 ggcorrplot(
-  round(cor(corrvar), 1), 
-  p.mat = cor_pmat(corrvar),
+  round(cor(corrvars), 1), 
+  p.mat = cor_pmat(corrvars),
   colors = c("#30003a", "white", "#063615"),
   type="lower",
   insig = "blank") +  
@@ -208,9 +221,18 @@ ggcorrplot(
         axis.title.y = element_blank())
 ```
 
+```{r}
+get_breaks(studentdata.f, 'sale_price', 4, 'quantile')
+get_breaks(studentdata.f, 'maxArea', 4, 'quantile')
+get_breaks(studentdata.f, 'age', 4, 'quantile')
+get_breaks(studentdata.f, 'farmersmarket.d.ft', 4, 'quantile')
+```
+
 ```{r variable summary dependent map}
-philly = st_read("https://opendata.arcgis.com/datasets/0960ea0f38f44146bb562f2b212075aa_0.geojson") %>%
-  st_transform('EPSG:6565') 
+philly = st_read("https://raw.githubusercontent.com/blackmad/neighborhoods/refs/heads/master/philadelphia.geojson") %>%
+  st_transform('EPSG:6565')
+
+print(q5(studentdata.f$sale_price))
 
 ggplot()+
     geom_sf(data=philly, fill='transparent',color='black', linewidth = 0.1) +
@@ -218,7 +240,8 @@ ggplot()+
     scale_color_manual(values = c('#ffffb2', '#c2e699', '#78c679', '#31a354', '#006837'),
                     name = "Houses Sales Price",
                     na.value = 'transparent',
-                    labels = c('< 250k', '250k-500k', '500k-750k', '750k-1mil', '1mil <')) +
+                    labels = c('< $137000', '$137000-$228000', '$228000-$330000', '$330000-$5990000', '$5990000 <')
+                    ) +
    theme(
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank(),
@@ -229,5 +252,94 @@ ggplot()+
         panel.background = element_blank(),
         legend.background = element_rect(fill="grey90")
         ) +
-  labs(title = "Distribution of Sale Price in Philadelphia") 
+  labs(title = "Sale Price of Houses in Philadelphia") 
+```
+
+```{r Correlation scatter plots}
+scattervars = studentdata.f %>% 
+  dplyr::select(sale_price, age, totRooms, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft) %>%
+  st_drop_geometry() %>%
+  gather(key = "variable", value = "value", -sale_price)
+
+ggplot(scattervars, aes(x = value, y = sale_price)) +
+  geom_point(alpha = 0.6) +  
+  facet_wrap(~variable, scales = "free_x") +  
+  geom_smooth(method = "lm", se=F, colour = "#FA7800") +
+  labs(
+    title = "Correlation Between Sale Price and Other Variables",
+    x = "Variable Value",
+    y = "Sale Price"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    strip.text = element_text(size = 10)  # Adjust facet label size
+  )
+```
+
+
+```{r area of house map}
+ggplot()+
+    geom_sf(data=philly, fill='transparent',color='black', linewidth = 0.1) +
+    geom_sf(data = filter(studentdata.f, maxArea != 'NA'), size=0.75, aes(colour = q5(maxArea))) +
+    scale_color_manual(values = c('#f6eff7','#bdc9e1','#67a9cf','#1c9099','#016c59'),
+                    name = "Area (ft^2)",
+                    na.value = 'transparent',
+                    labels = c('< 1114', '1114-1422', '1422-2000', '2000-226512', '226512 <')
+                    ) +
+   theme(
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.title = element_blank(),
+        plot.title = element_text(size = 12, face = "bold"),
+        panel.background = element_blank(),
+        legend.background = element_rect(fill="grey90")
+        ) +
+  labs(title = "Area of Houses in Philadelphia") 
+```
+
+```{r age map}
+ggplot()+
+    geom_sf(data=philly, fill='transparent',color='black', linewidth = 0.1) +
+    geom_sf(data = filter(studentdata.f, maxArea != 'NA'), size=0.75, aes(colour = q5(age))) +
+    scale_color_manual(values = c('#f6eff7','#bdc9e1','#67a9cf','#1c9099','#016c59'),
+                    name = "Age of House (Yr)",
+                    na.value = 'transparent',
+                    labels = c('<73', '73-98', '98-103', '103-273', '273+')
+                    ) +
+   theme(
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.title = element_blank(),
+        plot.title = element_text(size = 12, face = "bold"),
+        panel.background = element_blank(),
+        legend.background = element_rect(fill="grey90")
+        ) +
+  labs(title = "Age of Houses in Philadelphia") 
+```
+
+```{r farmers market map}
+ggplot()+
+    geom_sf(data=philly, fill='transparent',color='black', linewidth = 0.1) +
+    geom_sf(data = filter(studentdata.f, maxArea != 'NA'), size=0.75, aes(colour = q5(farmersmarket.d.ft))) +
+    scale_color_manual(values = c('#f6eff7','#bdc9e1','#67a9cf','#1c9099','#016c59'),
+                    name = "Distance to Nearest Farmers Market (ft)",
+                    na.value = 'transparent',
+                    labels = c('78-2553', '2553-4565', '4565-7116', '7116-30530', '30530+')
+                    ) +
+   theme(
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.title = element_blank(),
+        plot.title = element_text(size = 12, face = "bold"),
+        panel.background = element_blank(),
+        legend.background = element_rect(fill="grey90")
+        ) +
+  labs(title = "Houses and Their Distance to Nearest Farmers Market in Philadelphia") 
 ```
