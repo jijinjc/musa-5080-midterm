@@ -477,7 +477,9 @@ ggplot(as.data.frame(moranTest$res[c(1:999)]), aes(moranTest$res[c(1:999)])) +
        y = "Count")
 ```
 
-```{r fit control}
+### CROSS VALIDATION FOR NON SPATIAL GENERALIZATION VARIABLES
+
+```{r cross validation non spatial}
 fitControl = trainControl(method = "cv", number = 100)
 
 cvReg = 
@@ -500,7 +502,17 @@ census_api_key("0e028dfcee38f844e89c39d01870f6a964f675a2", overwrite = TRUE, ins
 ```
 
 ```{r adding spatial features}
-studentdata.sp = st_intersection(studentdata.f, philly %>% dplyr::select("name")) %>% rename(tractName = name)
+#district = st_read("https://raw.githubusercontent.com/jijinjc/musa-5080-midterm/refs/heads/main/Midterm%20Data/Council_Districts_2024.geojson") %>%
+  #st_transform("EPSG:6565")
+
+planningDistrict = st_read("https://opendata.arcgis.com/datasets/0960ea0f38f44146bb562f2b212075aa_0.geojson") %>%
+  st_transform("EPSG:6565")
+
+studentdata.sp = st_intersection(studentdata.f, planningDistrict %>% dplyr::select("DIST_NAME"))
+#st_intersection(studentdata.f, philly %>% dplyr::select("name")) %>% 
+#  rename(tractName = name) %>%
+#  st_intersection(studentdata.f, district %>% dplyr::select("DISTRICT")) %>%
+  
 
 acs20 = 
   get_acs(geography = "tract", 
@@ -565,7 +577,7 @@ testingmodel.sp = modellingdata.sp[-split_index, ]
 
 ```{r spatial table}
 reg2 <- lm(sale_price ~ ., data = studentdata.sp %>% st_drop_geometry() %>% 
-                                 dplyr::select(sale_price, age, totRooms, incBasements, incAC, buildingQuality, incGarage, stories, scenery, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft, minority.m, medHHInc, tractName))
+                                 dplyr::select(sale_price, age, totRooms, incBasements, incAC, buildingQuality, incGarage, stories, scenery, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft, minority.m, medHHInc, DIST_NAME))
 summary_reg2 <- summary(reg2)
 coefficients_table <- as.data.frame(summary_reg2$coefficients)
 
@@ -609,7 +621,7 @@ reg2.sumtable %>%
 ```{r MAE/MAPE of training model for spatial}
 trainingReg.sp <- lm(sale_price ~ ., na.action = na.omit, data = trainingmodel.sp %>% 
                       st_drop_geometry() %>% 
-                    dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft, minority.m, medHHInc, tractName))
+                    dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft, minority.m, medHHInc, DIST_NAME))
 
 testingmodel.sp.m = 
   testingmodel.sp %>% 
@@ -625,33 +637,33 @@ testingmodel.sp.m %>%
             MAPE = mean(SalePrice.APE, na.rm=TRUE)*100) %>%
   kbl(col.name=c('Mean Absolute Error','Mean Absolute Percentage Error')) %>%
   kable_styling( bootstrap_options = c("striped", "hover", "condensed")) %>%
-  footnote(general_title = "\n", general = "Table 2")  
+  footnote(general_title = "\n", general = "Table 6") 
+
 ```
 
 ### MORANS I FOR CENSUS AND SPATIAL
 
 ```{r}
-training.coords <-  st_coordinates(testingmodel.sp.m) 
-training.tracts <- knn2nb(knearneigh(training.coords, 5))
-spatialWeights.test_n <- nb2listw(training.tracts, style="W")
+testing.coords <-  st_coordinates(testingmodel.sp.m) 
+testing.tracts <- knn2nb(knearneigh(testing.coords, 5))
+spatialWeights.test_n <- nb2listw(testing.tracts, style="W")
 
-moranTest_n <- moran.mc(testingmodel.sp.m$SalePrice.Error, 
-                      spatialWeights.test_n, nsim = 999)
+moranTest_n <- moran.mc(na.exclude(testingmodel.sp.m$SalePrice.Error), spatialWeights.test_n, nsim = 999)
 
 ggplot(as.data.frame(moranTest_n$res[c(1:999)]), aes(moranTest_n$res[c(1:999)])) +
-  geom_histogram(binwidth = 0.01, fill = "#283d3b") +
-  geom_vline(aes(xintercept = moranTest_n$statistic), colour = "#c44536" ,size=1) +
+  geom_histogram(binwidth = 0.01, fill = "#48913c") +
+  geom_vline(aes(xintercept = moranTest_n$statistic), colour = "#9586a3" ,size=1) +
   scale_x_continuous(limits = c(-0.5, 0.5)) +
-  labs(title = "Observed and Permuted Moran's I - Neighborhood Effect",
-       subtitle = "Observed Moran's I in Red",
-       x = "Moran's I",
-       y = "Count") +
   theme_light() +   
   theme(plot.subtitle = element_text(size = 9,face = "italic"),
-        plot.title = element_text(size = 12, face = "bold"), 
-        axis.text.x=element_text(size=6),
-        axis.text.y=element_text(size=6), 
-        axis.title=element_text(size=8))
+      axis.text.x=element_text(size=6),
+      axis.text.y=element_text(size=6), 
+      axis.title=element_text(size=8),
+      plot.title = element_markdown(size = 14, face = "bold", hjust=0)) + 
+  labs(title = "<span style = 'color:#9586a3;'>Observed</span> and <span style = 'color:#48913c;'>Permuted</span> Moran's I",
+       x = "Moran's I",
+       y = "Count")
+
 ```
 
 ### PRICES AS A FUNCTION OF OBSERVED PRICE
@@ -685,7 +697,6 @@ saleError.T = testingmodel.sp.m %>%
                                    breaks = c(-Inf, -75000, -1000, 1000, 75000, Inf), 
                                    labels = c("< -75000", "-75000 - -1000", "-1000 - 1000", "1000 - 75000", "75000 <")))
 
-
 ggplot()+
   geom_sf(data=philly,fill='grey',color='black')+
   geom_sf(data=saleError.T %>% filter(!is.na(SalePrice.Error)), aes(colour = SalePrice.Error.Cat),size=0.5)+
@@ -694,7 +705,6 @@ ggplot()+
                                 "-1000 - 1000" = "#ffffbf",
                                 "1000 - 75000" = "#abdda4",
                                 "75000 <" = "#2b83ba"), name = "Sale Price Error") +
-  
   theme(
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank(),
@@ -708,6 +718,9 @@ ggplot()+
 ```
 
 ```{r}
+#testingmodel.sp.m <- testingmodel.sp.m[is.finite(testingmodel.sp.m$SalePrice.Error), ]
+testingmodel.sp.m$SalePrice.Error[!is.finite(testingmodel.sp.m$SalePrice.Error)] = mean(testingmodel.sp.m$SalePrice.Error, na.rm = TRUE)
+
 testingmodel.sp.m %>% 
   mutate(lagPriceError = lag.listw(spatialWeights.test_n, SalePrice.Error)) %>%
   ggplot()+
@@ -717,6 +730,37 @@ testingmodel.sp.m %>%
   labs(title="Sale Price Error as a Function of Lag Price Error",
        x = "Lag Price Error",
        y = "Sale Price Error") +
+theme_light() +   
+theme(plot.subtitle = element_text(size = 9,face = "italic"),
+        plot.title = element_text(size = 12, face = "bold"), 
+        axis.text.x=element_text(size=6),
+        axis.text.y=element_text(size=6), 
+        axis.title=element_text(size=8))
+```
+```{r cross validation for spatial}
+fitControl <- trainControl(method = "cv", number = 100)
+set.seed(1111)
+
+cvReg.sp <- 
+  train(sale_price ~ ., data = st_drop_geometry(studentdata.sp) %>% 
+                             dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft, minority.m, medHHInc, DIST_NAME), method = "lm", trControl = fitControl, na.action = na.pass)
+
+cvReg.sp$resample %>% 
+  summarise(MAE = mean(reg.cv$resample[,3]),
+            sd(reg.cv$resample[,3])
+) %>%
+  kbl(col.name=c('Mean Absolute Error','Standard Deviation of MAE')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  footnote(general_title = "\n", general = "Table 7")
+```
+
+```{r}
+cvReg.sp$resample %>% 
+ggplot(aes(x=cvReg.sp$resample[,3])) +
+    geom_histogram( fill="#197278", color="#e9ecef") + 
+    labs(title="Distribution of Mean Absolute Error for Overall Prediction",
+       x = "Mean Absolute Error",
+       y = "Count") +
 theme_light() +   
 theme(plot.subtitle = element_text(size = 9,face = "italic"),
         plot.title = element_text(size = 12, face = "bold"), 
