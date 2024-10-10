@@ -163,7 +163,8 @@ studentdata.f = studentdata %>%
   dplyr::select(-basements, -central_air, -garage_type, -interior_condition, -number_stories, -type_heater, -view_type, -quality_grade) %>%
   filter(age >= 0) %>%
   filter(age < 500) %>%
-  filter(sale_price <= 1000000)
+  filter(sale_price <= 1000000) %>%
+  filter(sale_price > 0)
 
 
 # Calculate distances to the nearest features using the indices
@@ -751,8 +752,8 @@ cvReg.sp <-
                              dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft, minority.m, medHHInc, DIST_NAME), method = "lm", trControl = fitControl, na.action = na.pass)
 
 cvReg.sp$resample %>% 
-  summarise(MAE = mean(reg.cv$resample[,3]),
-            sd(reg.cv$resample[,3])
+  summarise(MAE = mean(cvReg.sp$resample[,3]),
+            sd(cvReg.sp$resample[,3])
 ) %>%
   kbl(col.name=c('Mean Absolute Error','Standard Deviation of MAE')) %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
@@ -773,6 +774,8 @@ theme(plot.subtitle = element_text(size = 9,face = "italic"),
         axis.text.y=element_text(size=6), 
         axis.title=element_text(size=8))
 ```
+
+In the end, our model predicted sale prices according to the map below in Philadelphia. There are some 
 
 ```{r all value prediction}
 finalPrediction <- studentdata.sp %>% 
@@ -796,7 +799,7 @@ ggplot()+
   labs(title = "Distribution of Predicted Sale Price in Philadelphia") 
 ```
 
-Looking at the mean abssolute percentage error of the tracts in Philadelphia, we actually see that while there are many areas with
+Looking at the mean absolute percentage error of the tracts in Philadelphia, we actually see that a majority of the tracts and neighborhoods that we looked at fall around a 0.25 MAPE, showing that in general the error of prediction in those areas are not exceptionally high. There is, however, a few tracts within the region that we found there to be high MAPE, indicating that while the accuracy of the model is relatively consistent across a majority of the region, there are still several regions that it is unable to produce an especially accurate prediction.
 
 ```{r MAPE map}
 mapePlot = st_intersection(testingmodel.sp.m, philly %>% select(name)) %>% 
@@ -804,17 +807,15 @@ mapePlot = st_intersection(testingmodel.sp.m, philly %>% select(name)) %>%
   group_by(name) %>%
   summarise(mean.MAPE = mean(SalePrice.APE, na.rm = T)) %>% 
   left_join(philly) %>% 
-  mutate(mapeCat = cut(mean.MAPE,breaks = c(-Inf, -1, -0.25, 0.25, 1, Inf), labels = c("< -1", "-1 - -0.25", "-0.25 - 0.25", "0.25 - 1", "1 <"))) %>%
+ # mutate(mapeCat = cut(mean.MAPE,breaks = c(-Inf, -1, -0.25, 0.25, 1, Inf), labels = c("< -1", "-1 - -0.25", "-0.25 - 0.25", "0.25 - 1", "1 <"))) %>%
   st_sf() 
 
 mapePlot %>% 
   ggplot() + 
-      geom_sf(aes(fill = mapeCat)) +
-      scale_fill_manual(values = c("< -1" = "#7b3294",
-                                "-1 - -0.25" = "#c2a5cf",
-                                "-0.25 - 0.25" = "#f7f7f7",
-                                "0.25 - 1" = "#a6dba0",
-                                "1 <" = "#008837"), name = "MAPE") +
+      #geom_sf(aes(fill = mapeCat)) + 
+      geom_sf(aes(fill = mean.MAPE)) +
+      #scale_fill_manual(values = c("< -1" = "#7b3294","-1 - -0.25" = "#c2a5cf","-0.25 - 0.25" = "#f7f7f7","0.25 - 1" = "#a6dba0","1 <" = "#008837"), name = "MAPE") +
+      scale_fill_continuous(low = "white", high = "#008837", name= "MAPE") + 
       theme(
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank(),
@@ -826,6 +827,8 @@ mapePlot %>%
         ) +
   labs(title = "Mean Absolute Percentage Error By Census Tract") 
 ```
+
+The scatterplot below also takes a look at sale price and mape of the neighbourhoods. In general, there is a bigger cluster when the MAPE values are lower than 0.4. These MAPE values are observed regardless of sale price, which may mean that the model has a relatively consistent prediction. However,we also see that the MAPE values that are relatively high tend to also occur when their respective sale price is relatively lower, possibly representing that the neighborhoods with less expensive homes are more difficult to predict with our model. Overall, the model is generally quite accurate for those homes that are moderately priced.
 
 ```{r scatterplot mape neighborhood, echo=FALSE, warning=FALSE, message=FALSE}
 testingmodel.phl <- st_join(testingmodel.sp.m, philly %>% select(name)) %>% 
@@ -848,7 +851,7 @@ testingmodel.phl %>%
         axis.title=element_text(size=8))
 ```
 
-Finally, for a generalization check, we are looking at the social minority and majority in Philadelphia. Despite the fact that the model yields a 29% for social majority tracts and 42% for social minority tracts, the model is unfortunately unable to provide highly general results for neither social majority nor minority tracts. 
+Finally, for a generalization check, we are looking at the social minority and majority in Philadelphia. Despite the fact that the model yields a 26% for social majority tracts and 4% for social minority tracts, the model is unfortunately unable to provide highly general results for neither social majority nor minority tracts. 
 
 ```{r generalization}
 ggplot() + geom_sf(data = na.omit(acs20), aes(fill = majority), color = NA) +
