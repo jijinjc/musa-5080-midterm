@@ -1,6 +1,6 @@
 ---
 title: "Midterm"
-author: "Jack Chen, Emmanuel"
+author: "Jack Chen, Emmanuel Jiang"
 date: "2024-10-04"
 output: html_document
 ---
@@ -10,6 +10,13 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Introduction
+
+The purpose of this project is to create a predictive model that leverages comprehensive datasets from various sources, including Philadelphia’s Open Data portal and Tigris, to enhance the accuracy of home price predictions. By focusing on local factors and features that impact property values, the team aims to deliver insights that can significantly inform Zillow's pricing strategies.
+
+There are particular challenges associated with this exercise. First, the intricacies of the Philadelphia housing market require a nuanced understanding of various local variables, such as neighborhood characteristics, amenities, and spatial structures. Second, the analysis is limited to using Ordinary Least Squares (OLS) regression for the modeling approach, which, while foundational, may not capture complex nonlinear relationships as effectively as other algorithms. Thus, the modeling strategy involves meticulous feature selection and engineering to optimize the predictive power of the OLS regression model.
+
+This report will detail the data gathering methods, present the summary statistics, and explore the correlations among key variables. Additionally, the findings will be visualized through various maps and scatterplots to provide a clear narrative that supports the analytical insights. By the conclusion of this project, the aim is not only to generate accurate predictions but also to foster a deeper understanding of the factors influencing housing prices in Philadelphia, ultimately guiding Zillow in enhancing its market predictions.
+
 
 ```{r library, include=FALSE}
 library(tidyverse)
@@ -24,7 +31,12 @@ library(ggcorrplot)
 library(dplyr)
 library(RColorBrewer)
 library(classInt)
-
+library(kableExtra)
+library(tidycensus)
+library(ggplot2)
+library(reshape2)
+library(ggtext)
+library(glue)
 #library(geojsonio)
 
 root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
@@ -46,6 +58,8 @@ get_breaks <- function(sf_object, column_name, num_breaks, breaktype) {
 ```
 
 # Data
+
+The major dataset involved in this project is the Philadelphia housing price data, which serves as the dependent variable to predict. Independent variables include local amenities such as hospitals, schools, parks, and farmers' markets, all of which are crucial to understanding the factors that influence housing prices.
 
 ```{r data, include=FALSE}
 studentdata = st_read("https://raw.githubusercontent.com/jijinjc/musa-5080-midterm/refs/heads/main/Midterm%20Data/studentData.geo.json") %>%
@@ -76,9 +90,18 @@ crime = read.csv("https://raw.githubusercontent.com/jijinjc/musa-5080-midterm/re
 |                Area                |         maxArea          |
 |        Observable Sceneries        |         scenery          |
 |        **Nearby Amenities**        |                          |
-|       Distance to Hospitals        |                          |
+|       Distance to Hospitals        |      hospitals.d.ft      |
 | Distance to Nearest Farmers Market |                          |
-|     Nearby Schools     |                          |
+|           Nearby Schools           |        schools.c         |
+
+
+## Data Wrangling
+
+In this section, the focus is on preparing and transforming the raw datasets to make them suitable for analysis. The objective is to extract relevant features, clean the data, and calculate distances to key amenities, which will serve as important predictors in the housing price prediction model.
+
+The first step involves loading each dataset corresponding to various amenities, including farmers' markets, hospitals, parks, schools, and bike stations. For each dataset, the select() function is used to retain only the necessary variables. For instance, when selecting data for farmers' markets, the team keeps identifiers and geometric information. Similarly, the hospital dataset is filtered to retain essential hospital identifiers and geographic data, while the parks dataset selects park identifiers and their geometry for further spatial analysis.
+
+For the schools dataset, the team filters out institutions affiliated with religious organizations, ensuring a focus on public and charter schools. This is particularly important, as it allows for a broader analysis of schools that serve a diverse population. The bike station dataset is also processed to retain necessary identifiers and spatial information, making it suitable for subsequent analyses.
 
 ```{r wrangle data, includ=FALSE}
 farmersmarket.f = farmermarket %>%
@@ -94,9 +117,9 @@ bikestations.f = bikestations %>%
   select(id, name, addressStreet, addressZipCode, latitude, longitude, coordinates, geometry)
 
 studentdata.f = studentdata %>%
-  dplyr::select(objectid, basements, geometry, census_tract, category_code, central_air, fireplaces, fuel, garage_type, interior_condition, location, number_of_bedrooms, number_of_bathrooms, number_stories, number_of_rooms, quality_grade, state_code, street_code, sale_price, sale_date, sale_year, total_livable_area, type_heater, total_area, unfinished, unit, view_type, year_built, zip_code, toPredict) %>%
+  dplyr::select(objectid, basements, geometry, census_tract, category_code, central_air, fireplaces, fuel, garage_type, interior_condition, location, number_of_bedrooms, number_of_bathrooms, number_stories, number_of_rooms, parcel_number, quality_grade, state_code, street_code, sale_price, sale_date, sale_year, total_livable_area, type_heater, total_area, unfinished, unit, view_type, year_built, zip_code, toPredict) %>%
   mutate(incBasements = case_when(
-          !is.na(basements) & basements != 0~ "Y", TRUE~ "N"),
+          !is.na(basements) & basements != 0 ~ "Y", TRUE~ "N"),
         incAC = case_when(
           central_air %in% c("1", "Y") ~ "Y",
           TRUE~ "N"),
@@ -117,8 +140,11 @@ studentdata.f = studentdata %>%
            number_stories == 1  ~ "SINGLE",
            TRUE~ "MULTIPLE"),
         maxArea = case_when(
-           total_livable_area > total_area ~ total_livable_area,
-           TRUE ~ total_area),
+          is.na(total_livable_area) & !is.na(total_area) ~ total_area,
+          !is.na(total_livable_area) & is.na(total_area) ~ total_livable_area,
+          is.na(total_livable_area) & is.na(total_area) ~ 0,
+          total_livable_area > total_area ~ total_livable_area,
+          TRUE ~ total_area),
         incHeater = case_when(
            type_heater == 0 | is.na(type_heater)  ~ "N",
            TRUE~ "Y"),
@@ -129,24 +155,21 @@ studentdata.f = studentdata %>%
         buildingQuality = case_when(
            quality_grade %in% c("3", "4", "5", "6", "A", "A+", "A-", "B", "B+","B-","S","S+","X-")  ~ "Good",
            TRUE~ "Bad")) %>%
+  mutate(logMaxArea = log(maxArea)) %>%
   dplyr::select(-basements, -central_air, -garage_type, -interior_condition, -number_stories, -type_heater, -view_type, -quality_grade) %>%
   filter(age >= 0) %>%
   filter(age < 500)
 
 
-fm.idx = st_nearest_feature(studentdata.f, farmersmarket.f)
-hospital.idx = st_nearest_feature(studentdata.f, hospital.f)
-parks.idx = st_nearest_feature(studentdata.f, parks.f)
-
 # Calculate distances to the nearest features using the indices
 studentdata.f = studentdata.f %>%
   mutate(
     farmersmarket.d.ft = as.numeric(
-      st_distance(geometry, st_geometry(farmersmarket.f)[fm.idx], by_element = TRUE)),
+      nn_function(st_coordinates(studentdata.f), st_coordinates(farmersmarket.f), 1)),
     hospital.d.ft = as.numeric(
-      st_distance(geometry, st_geometry(hospital.f)[hospital.idx], by_element = TRUE)),
+      nn_function(st_coordinates(studentdata.f), st_coordinates(hospital.f), 1)),
     parks.d.ft = as.numeric(
-      st_distance(geometry, st_geometry(parks.f)[parks.idx], by_element = TRUE)),
+      nn_function(st_coordinates(studentdata.f), st_coordinates(parks.f), 1)),
     schools.c = lengths(
       st_intersects(studentdata.f, st_buffer(schools.f, units::set_units(1.5, mile)))),
     bikestations.c = lengths(
@@ -156,15 +179,24 @@ studentdata.f = studentdata.f %>%
 # group_by(schools, TYPE_SPECIFIC) %>%
 #   summarize(count = n()) %>%
 #   arrange(-count)
+```
 
+## Data splitting
+
+The process of splitting the dataset into training and testing subsets is a fundamental step in developing a predictive model. This division serves multiple purposes, primarily aimed at enhancing the model's reliability and generalizability. By segregating the data, the team ensures that the model is trained on one portion while being evaluated on a completely separate portion, which is crucial for assessing the model’s performance on unseen data.
+
+Training the model on a subset of the data allows it to learn the underlying patterns and relationships between the input features and the target variable—in this case, housing prices. This training set is used to optimize the model’s parameters and improve its predictive capabilities. By exposing the model to a diverse range of examples during training, the team can increase the likelihood that it will perform well when applied to new, unseen data.
+
+Additionally, setting a random seed in the data splitting process enhances reproducibility. By fixing the random seed, the team ensures that the same rows are selected for the training and testing sets each time the code is executed. This consistency is vital for validating results and conducting further analyses or iterations of the model, as it allows other researchers or analysts to replicate the findings under the same conditions.
+
+```{r splitting data}
 modellingdata = studentdata.f %>%
   filter(toPredict == 'MODELLING') 
 
+
 challengedata = studentdata.f %>%
   filter(toPredict == 'CHALLENGE')
-```
 
-```{r split data}
 set.seed(1111) 
 total_features = nrow(modellingdata)
 split_index = sample(1:total_features, size = total_features * 0.6)
@@ -174,6 +206,11 @@ trainingmodel = modellingdata[split_index, ]
 testingmodel = modellingdata[-split_index, ] %>%
   select(-sale_price)
 ```
+
+## Moran's I
+
+This section of the code is dedicated to evaluating spatial autocorrelation in the housing price data using Moran's I statistic. Spatial autocorrelation measures the degree to which a variable at one location is correlated with values of the same variable at nearby locations. Understanding this spatial relationship is crucial in housing price analysis, as it can reveal patterns in property values that are influenced by geographical factors.
+
 
 ```{r decide moran/k, include=FALSE, eval=FALSE}
 moran_results = data.frame(K = integer(),
@@ -199,6 +236,8 @@ print(moran_results)
  # K=7
 ```
 
+### NO SPATIAL CHARACTERISTICS (MINORITY + MEDHHINC)
+
 ```{r data summary corrmatrix, }
 corrvars = studentdata.f %>% 
   dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft) %>%
@@ -221,12 +260,14 @@ ggcorrplot(
         axis.title.y = element_blank())
 ```
 
-```{r}
+```{r quantile values, include=FALSE}
 get_breaks(studentdata.f, 'sale_price', 4, 'quantile')
 get_breaks(studentdata.f, 'maxArea', 4, 'quantile')
 get_breaks(studentdata.f, 'age', 4, 'quantile')
 get_breaks(studentdata.f, 'farmersmarket.d.ft', 4, 'quantile')
 ```
+
+### DATA DELIVERABLES
 
 ```{r variable summary dependent map}
 philly = st_read("https://raw.githubusercontent.com/blackmad/neighborhoods/refs/heads/master/philadelphia.geojson") %>%
@@ -276,7 +317,6 @@ ggplot(scattervars, aes(x = value, y = sale_price)) +
     strip.text = element_text(size = 10)  # Adjust facet label size
   )
 ```
-
 
 ```{r area of house map}
 ggplot()+
@@ -342,4 +382,345 @@ ggplot()+
         legend.background = element_rect(fill="grey90")
         ) +
   labs(title = "Houses and Their Distance to Nearest Farmers Market in Philadelphia") 
+```
+
+
+```{r splitting data, include=FALSE}
+modellingdata = studentdata.f %>%
+  filter(toPredict == 'MODELLING') 
+
+
+challengedata = studentdata.f %>%
+  filter(toPredict == 'CHALLENGE')
+
+set.seed(1111) 
+total_features = nrow(modellingdata)
+split_index = sample(1:total_features, size = total_features * 0.6)
+
+
+trainingmodel = modellingdata[split_index, ] 
+testingmodel = modellingdata[-split_index, ] %>%
+  select(-sale_price)
+```
+
+### REGRESSION FOR ALL NON ACS VARIABLES
+
+```{r training regression}
+trReg <- lm(sale_price ~ ., data = trainingmodel %>% st_drop_geometry() %>% 
+                                 dplyr::select(sale_price, age, totRooms, incBasements, incAC, buildingQuality, incGarage, stories, scenery, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft))
+
+trRegSummary <- summary(trReg)
+coTable <- as.data.frame(trRegSummary$coefficients)
+
+coTable$significance <- ifelse(coTable$`Pr(>|t|)` < 0.001, '***',
+                                         ifelse(coTable$`Pr(>|t|)` < 0.01, '**',
+                                                ifelse(coTable$`Pr(>|t|)` < 0.05, '*',
+                                                       ifelse(coTable$`Pr(>|t|)` < 0.1, '.', ''))))
+
+coTable$p_value <- paste0(round(coTable$`Pr(>|t|)`, digits = 3), coTable$significance)
+
+coTable %>%
+  select(-significance, -`Pr(>|t|)`) %>% 
+  kable(align = "r") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  footnote(general_title = "\n", general = "Table 1")
+```
+
+### MAE AND MAPE FOR NO ACS VALUE (GENERALIZATION)
+
+```{r regression of training model}
+trainingReg <- lm(sale_price ~ ., data = trainingmodel %>% 
+                    st_drop_geometry() %>% 
+                    dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft))
+
+trainingmodel.m <- 
+  trainingmodel %>% 
+  mutate(Regression = "BASE", 
+    SalePrice.Predict = predict(trainingReg, trainingmodel),
+         SalePrice.Error = SalePrice.Predict - sale_price,
+         SalePrice.AbsError = abs(SalePrice.Predict - sale_price),
+         SalePrice.APE = (abs(SalePrice.Predict - sale_price)) / SalePrice.Predict)
+
+trainingmodel.m %>% 
+  st_drop_geometry() %>%
+  summarise(MAE = mean(SalePrice.AbsError),
+            MAPE = mean(SalePrice.APE)*100) %>%
+  kbl(col.name=c('Mean Absolute Error','Mean Absolute Percentage Error')) %>%
+  kable_styling( bootstrap_options = c("striped", "hover", "condensed")) %>%
+  footnote(general_title = "\n", general = "Table 2")  
+```
+
+### SPATIALAUTOCORRELATION AND MORAN'S I FOR NO ACS VALUES 
+
+```{r moran's test}
+coords.test <-  st_coordinates(trainingmodel.m) 
+neighborList.test <- knn2nb(knearneigh(coords.test, 7))
+spatialWeights.test <- nb2listw(neighborList.test, style="W")
+
+moranTest <- moran.mc(trainingmodel.m$SalePrice.Error, 
+                      spatialWeights.test, nsim = 999)
+```
+
+```{r moran's plot}
+ggplot(as.data.frame(moranTest$res[c(1:999)]), aes(moranTest$res[c(1:999)])) +
+  geom_histogram(binwidth = 0.01, fill = "#48913c") +
+  geom_vline(aes(xintercept = moranTest$statistic), colour = "#9586a3" ,size=1) +
+  scale_x_continuous(limits = c(-0.5, 0.5)) +
+  theme_light() +   
+  theme(plot.subtitle = element_text(size = 9,face = "italic"),
+      axis.text.x=element_text(size=6),
+      axis.text.y=element_text(size=6), 
+      axis.title=element_text(size=8),
+      plot.title = element_markdown(size = 14, face = "bold", hjust=0)) + 
+  labs(title = "<span style = 'color:#9586a3;'>Observed</span> and <span style = 'color:#48913c;'>Permuted</span> Moran's I",
+       x = "Moran's I",
+       y = "Count")
+```
+
+```{r fit control}
+fitControl = trainControl(method = "cv", number = 100)
+
+cvReg = 
+  train(sale_price ~ ., data = st_drop_geometry(studentdata.f) %>% 
+                             dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft), method = "lm", trControl = fitControl, na.action = na.pass)
+
+cvReg$resample %>% 
+  summarise(MAE = mean(cvReg$resample[,3]),
+            sd(cvReg$resample[,3])
+) %>%
+  kbl(col.name=c('Mean Absolute Error','Standard Deviation of MAE')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  footnote(general_title = "\n", general = "Table 3")
+```
+
+# Adding Census Data and neighborhood 
+
+```{r census key, include=FALSE, eval=FALSE}
+census_api_key("0e028dfcee38f844e89c39d01870f6a964f675a2", overwrite = TRUE, install = TRUE)
+```
+
+```{r adding spatial features}
+studentdata.sp = st_intersection(studentdata.f, philly %>% dplyr::select("name")) %>% rename(tractName = name)
+
+acs20 = 
+  get_acs(geography = "tract", 
+          variables = c("B02001_001E", 
+            "B02001_002E", 
+            "B02001_003E", 
+            "B02001_005E", 
+            "B03002_012E",
+            "B19013_001E"), 
+          year=2020, state=42, county=101, 
+          geometry=TRUE, output="wide") %>%
+  st_transform('EPSG:6565') %>% 
+  rename(totPop = B02001_001E, 
+         white = B02001_002E,
+         black = B02001_003E,
+         asian = B02001_005E,
+         hispanic = B03002_012E,
+         medHHIncome = B19013_001E) %>% 
+  mutate(pctMinority = ifelse(totPop > 0, (black + asian + hispanic ) / totPop, 0), 
+         majority = ifelse(pctMinority > 0.5, "minority", "majority"))
+
+joinrace = studentdata.sp %>% 
+  st_intersection(acs20 %>% select(pctMinority)) %>% 
+  st_drop_geometry() %>% 
+  group_by(parcel_number) %>% 
+  summarize(
+    minority.m = mean(pctMinority))
+joinHHinc = studentdata.sp %>%
+  st_intersection(acs20 %>% select(medHHIncome)) %>%
+  st_drop_geometry() %>%
+  group_by(parcel_number) %>%
+  summarize(
+    medHHInc = medHHIncome
+  )
+
+studentdata.sp = studentdata.sp %>% 
+  left_join(joinrace, by = "parcel_number") %>%
+  left_join(joinHHinc, by = "parcel_number") 
+```
+
+```{r split spatial}
+modellingdata.sp = studentdata.sp %>%
+  filter(toPredict == 'MODELLING') 
+
+
+challengedata.sp = studentdata.sp %>%
+  filter(toPredict == 'CHALLENGE')
+
+set.seed(1111) 
+total_features = nrow(modellingdata.sp)
+split_index = sample(1:total_features, size = total_features * 0.6)
+
+
+trainingmodel.sp = modellingdata.sp[split_index, ] 
+testingmodel.sp = modellingdata.sp[-split_index, ]
+
+#testingmodel.sp = modellingdata.sp[-split_index, ] %>%
+  #select(-sale_price)
+```
+
+### REGRESSION FOR ALL VARIABLE INCLUDING ACS
+
+```{r spatial table}
+reg2 <- lm(sale_price ~ ., data = studentdata.sp %>% st_drop_geometry() %>% 
+                                 dplyr::select(sale_price, age, totRooms, incBasements, incAC, buildingQuality, incGarage, stories, scenery, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft, minority.m, medHHInc, tractName))
+summary_reg2 <- summary(reg2)
+coefficients_table <- as.data.frame(summary_reg2$coefficients)
+
+
+coefficients_table$significance <- ifelse(coefficients_table$`Pr(>|t|)` < 0.001, '***',
+                                         ifelse(coefficients_table$`Pr(>|t|)` < 0.01, '**',
+                                                ifelse(coefficients_table$`Pr(>|t|)` < 0.05, '*',
+                                                       ifelse(coefficients_table$`Pr(>|t|)` < 0.1, '.', ''))))
+
+coefficients_table$p_value <- paste0(round(coefficients_table$`Pr(>|t|)`, digits = 3), coefficients_table$significance)
+
+coefficients_table %>%
+  select(-significance, -`Pr(>|t|)`) %>% 
+  kable(align = "r") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  footnote(general_title = "\n", general = "Table 4")
+```
+
+
+
+### R AND F TABLE FOR ALL VARIABLES
+
+```{r}
+reg2.sumtable <- data.frame(
+  Statistic = c("Multiple R-squared", "Adjusted R-squared", "F-statistic"),
+  Value = c(
+    summary_reg2$r.squared,
+    summary_reg2$adj.r.squared,
+    summary_reg2$fstatistic[1]
+  )
+)
+
+reg2.sumtable %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))%>%
+  footnote(general_title = "\n", general = "Table 5")
+```
+
+### MAE AND MAPE FOR ALL VARS
+
+```{r MAE/MAPE of training model for spatial}
+trainingReg.sp <- lm(sale_price ~ ., na.action = na.omit, data = trainingmodel.sp %>% 
+                      st_drop_geometry() %>% 
+                    dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft, minority.m, medHHInc, tractName))
+
+testingmodel.sp.m = 
+  testingmodel.sp %>% 
+  mutate(Regression = "TRACT-NEIGHBORHOOD", 
+    SalePrice.Predict = predict(trainingReg.sp, testingmodel.sp),
+         SalePrice.Error = SalePrice.Predict - sale_price,
+         SalePrice.AbsError = abs(SalePrice.Predict - sale_price),
+         SalePrice.APE = (abs(SalePrice.Predict - sale_price)) / SalePrice.Predict)
+
+testingmodel.sp.m %>% 
+  st_drop_geometry() %>%
+  summarise(MAE = mean(SalePrice.AbsError, na.rm=TRUE),
+            MAPE = mean(SalePrice.APE, na.rm=TRUE)*100) %>%
+  kbl(col.name=c('Mean Absolute Error','Mean Absolute Percentage Error')) %>%
+  kable_styling( bootstrap_options = c("striped", "hover", "condensed")) %>%
+  footnote(general_title = "\n", general = "Table 2")  
+```
+
+### MORANS I FOR CENSUS AND SPATIAL
+
+```{r}
+training.coords <-  st_coordinates(testingmodel.sp.m) 
+training.tracts <- knn2nb(knearneigh(training.coords, 5))
+spatialWeights.test_n <- nb2listw(training.tracts, style="W")
+
+moranTest_n <- moran.mc(testingmodel.sp.m$SalePrice.Error, 
+                      spatialWeights.test_n, nsim = 999)
+
+ggplot(as.data.frame(moranTest_n$res[c(1:999)]), aes(moranTest_n$res[c(1:999)])) +
+  geom_histogram(binwidth = 0.01, fill = "#283d3b") +
+  geom_vline(aes(xintercept = moranTest_n$statistic), colour = "#c44536" ,size=1) +
+  scale_x_continuous(limits = c(-0.5, 0.5)) +
+  labs(title = "Observed and Permuted Moran's I - Neighborhood Effect",
+       subtitle = "Observed Moran's I in Red",
+       x = "Moran's I",
+       y = "Count") +
+  theme_light() +   
+  theme(plot.subtitle = element_text(size = 9,face = "italic"),
+        plot.title = element_text(size = 12, face = "bold"), 
+        axis.text.x=element_text(size=6),
+        axis.text.y=element_text(size=6), 
+        axis.title=element_text(size=8))
+```
+
+### PRICES AS A FUNCTION OF OBSERVED PRICE
+
+```{r price func of observed price}
+testingmodel.sp.m %>%
+  dplyr::select(SalePrice.Predict, sale_price) %>%
+  ggplot(aes(sale_price, SalePrice.Predict)) +
+  geom_point(color = "#9586a3", size = 0.3) +
+  stat_smooth(aes(sale_price, sale_price), 
+             method = "lm", se = FALSE, size = 1, colour="#006d2c") + 
+  stat_smooth(aes(SalePrice.Predict, sale_price), 
+              method = "lm", se = FALSE, size = 1, colour="darkturquoise") +
+    theme_light() +   
+  theme(plot.subtitle = element_markdown(size = 9, face = "italic", hjust=0),
+        plot.title = element_text(size = 12, face = "bold"), 
+        axis.text.x=element_text(size=6),
+        axis.text.y=element_text(size=6), 
+        axis.title=element_text(size=8)) +
+  labs(title="Predicted Sale Price as a Function of Observed Price",
+       subtitle="<span style = 'color:darkturquoise;'>100% Accurate Prediction</span> vs <span style = 'color:#006d2c;'>Our Prediction</span>",
+       x = "Sale Price",
+       y = "Predict Price")
+```
+
+### SALE PRICE ERROR MAP
+
+```{r sale price error map }
+saleError.T = testingmodel.sp.m %>%
+  mutate(SalePrice.Error.Cat = cut(SalePrice.Error, 
+                                   breaks = c(-Inf, -75000, -1000, 1000, 75000, Inf), 
+                                   labels = c("< -75000", "-75000 - -1000", "-1000 - 1000", "1000 - 75000", "75000 <")))
+
+
+ggplot()+
+  geom_sf(data=philly,fill='grey',color='black')+
+  geom_sf(data=saleError.T %>% filter(!is.na(SalePrice.Error)), aes(colour = SalePrice.Error.Cat),size=0.5)+
+  scale_color_manual(values = c("< -75000" = "#d7191c",
+                                "-75000 - -1000" = "#fdae61",
+                                "-1000 - 1000" = "#ffffbf",
+                                "1000 - 75000" = "#abdda4",
+                                "75000 <" = "#2b83ba"), name = "Sale Price Error") +
+  
+  theme(
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        plot.subtitle = element_text(size = 9,face = "italic"),
+        plot.title = element_text(size = 12, face = "bold"),
+        panel.background = element_blank(),
+        ) +
+  labs(title = "Sale Price Error of Testing Set") 
+```
+
+```{r}
+testingmodel.sp.m %>% 
+  mutate(lagPriceError = lag.listw(spatialWeights.test_n, SalePrice.Error)) %>%
+  ggplot()+
+  geom_point(aes(x =lagPriceError, y =SalePrice.Error), color = "#c44536", size = 0.3)+
+  stat_smooth(aes(lagPriceError, SalePrice.Error), 
+             method = "lm", se = FALSE, size = 1, colour="#197278")  +
+  labs(title="Sale Price Error as a Function of Lag Price Error",
+       x = "Lag Price Error",
+       y = "Sale Price Error") +
+theme_light() +   
+theme(plot.subtitle = element_text(size = 9,face = "italic"),
+        plot.title = element_text(size = 12, face = "bold"), 
+        axis.text.x=element_text(size=6),
+        axis.text.y=element_text(size=6), 
+        axis.title=element_text(size=8))
 ```
