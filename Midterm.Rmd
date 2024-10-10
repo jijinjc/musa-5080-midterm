@@ -19,6 +19,10 @@ This report will detail the data gathering methods, present the summary statisti
 
 
 ```{r library, include=FALSE}
+options(scipen=999)
+options(tigris_class = "sf")
+options(digits = 3)
+
 library(tidyverse)
 library(sf)
 library(spdep)
@@ -158,7 +162,8 @@ studentdata.f = studentdata %>%
   mutate(logMaxArea = log(maxArea)) %>%
   dplyr::select(-basements, -central_air, -garage_type, -interior_condition, -number_stories, -type_heater, -view_type, -quality_grade) %>%
   filter(age >= 0) %>%
-  filter(age < 500)
+  filter(age < 500) %>%
+  filter(sale_price <= 1000000)
 
 
 # Calculate distances to the nearest features using the indices
@@ -724,9 +729,9 @@ testingmodel.sp.m$SalePrice.Error[!is.finite(testingmodel.sp.m$SalePrice.Error)]
 testingmodel.sp.m %>% 
   mutate(lagPriceError = lag.listw(spatialWeights.test_n, SalePrice.Error)) %>%
   ggplot()+
-  geom_point(aes(x =lagPriceError, y =SalePrice.Error), color = "#c44536", size = 0.3)+
+  geom_point(aes(x =lagPriceError, y =SalePrice.Error), color = "#9586a3", size = 0.3)+
   stat_smooth(aes(lagPriceError, SalePrice.Error), 
-             method = "lm", se = FALSE, size = 1, colour="#197278")  +
+             method = "lm", se = FALSE, size = 1, colour="#006d2c")  +
   labs(title="Sale Price Error as a Function of Lag Price Error",
        x = "Lag Price Error",
        y = "Sale Price Error") +
@@ -754,10 +759,10 @@ cvReg.sp$resample %>%
   footnote(general_title = "\n", general = "Table 7")
 ```
 
-```{r}
+```{r distribution of MAE histogram}
 cvReg.sp$resample %>% 
 ggplot(aes(x=cvReg.sp$resample[,3])) +
-    geom_histogram( fill="#197278", color="#e9ecef") + 
+    geom_histogram( fill="#006d2c", color="#e9ecef") + 
     labs(title="Distribution of Mean Absolute Error for Overall Prediction",
        x = "Mean Absolute Error",
        y = "Count") +
@@ -767,4 +772,109 @@ theme(plot.subtitle = element_text(size = 9,face = "italic"),
         axis.text.x=element_text(size=6),
         axis.text.y=element_text(size=6), 
         axis.title=element_text(size=8))
+```
+
+```{r all value prediction}
+finalPrediction <- studentdata.sp %>% 
+  mutate(prediction = predict(trainingReg.sp, studentdata.sp)) %>%
+  mutate(prediction_class = cut(prediction, breaks = c(0, 250000, 500000, 750000, 1000000, max(prediction, na.rm=TRUE))))
+
+ggplot()+
+    geom_sf(data=philly, fill='grey90',color='black')+
+    geom_sf(data= finalPrediction %>% filter(!is.na(prediction_class)), size=0.75, aes(colour = q5(prediction_class)))+
+    scale_color_manual(values = c("#ffffcc", "#c2e699", "#78c679", "#31a354", "#006837"),
+                     name = "Sales Price",
+                     labels = c('< 250k', '250k-500k', '500k-750k', '750k-1m', '1m +')) +
+   theme(
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        plot.title = element_text(size = 12, face = "bold"),
+        panel.background = element_blank(),
+        ) +
+  labs(title = "Distribution of Predicted Sale Price in Philadelphia") 
+```
+
+Looking at the mean abssolute percentage error of the tracts in Philadelphia, we actually see that while there are many areas with
+
+```{r MAPE map}
+mapePlot = st_intersection(testingmodel.sp.m, philly %>% select(name)) %>% 
+  st_drop_geometry() %>% 
+  group_by(name) %>%
+  summarise(mean.MAPE = mean(SalePrice.APE, na.rm = T)) %>% 
+  left_join(philly) %>% 
+  mutate(mapeCat = cut(mean.MAPE,breaks = c(-Inf, -1, -0.25, 0.25, 1, Inf), labels = c("< -1", "-1 - -0.25", "-0.25 - 0.25", "0.25 - 1", "1 <"))) %>%
+  st_sf() 
+
+mapePlot %>% 
+  ggplot() + 
+      geom_sf(aes(fill = mapeCat)) +
+      scale_fill_manual(values = c("< -1" = "#7b3294",
+                                "-1 - -0.25" = "#c2a5cf",
+                                "-0.25 - 0.25" = "#f7f7f7",
+                                "0.25 - 1" = "#a6dba0",
+                                "1 <" = "#008837"), name = "MAPE") +
+      theme(
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        plot.title = element_text(size = 12, face = "bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "grey", fill=NA, size=0.4)
+        ) +
+  labs(title = "Mean Absolute Percentage Error By Census Tract") 
+```
+
+```{r scatterplot mape neighborhood, echo=FALSE, warning=FALSE, message=FALSE}
+testingmodel.phl <- st_join(testingmodel.sp.m, philly %>% select(name)) %>% 
+  group_by(name) %>%
+  summarise(mean.MAPE = mean(SalePrice.APE, na.rm = T)) %>% 
+  mutate(st_join(testingmodel.sp.m, philly %>% select(name)) %>% group_by(name) %>%
+  summarise(mean.Price = mean(sale_price, na.rm = T)))
+
+testingmodel.phl %>%
+  ggplot(aes(mean.MAPE,mean.Price)) +
+  geom_point(color = "#9586a3", size = 1 ) +
+    labs(title="Sale Price as a Function of MAPE by Neighborhood",
+       x = "MAPE",
+       y = "Sale Price") +
+  theme_light() +   
+  theme(plot.subtitle = element_text(size = 9,face = "italic"),
+        plot.title = element_text(size = 12, face = "bold"), 
+        axis.text.x=element_text(size=6),
+        axis.text.y=element_text(size=6), 
+        axis.title=element_text(size=8))
+```
+
+Finally, for a generalization check, we are looking at the social minority and majority in Philadelphia. Despite the fact that the model yields a 29% for social majority tracts and 42% for social minority tracts, the model is unfortunately unable to provide highly general results for neither social majority nor minority tracts. 
+
+```{r generalization}
+ggplot() + geom_sf(data = na.omit(acs20), aes(fill = majority), color = NA) +
+    scale_fill_manual(values = c("#7fbf7b", "#9586a3")) +
+    geom_sf(data=philly, fill='transparent',color='black') +
+    guides(fill = "none")+
+    theme(
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        plot.title = element_markdown(size = 14, face = "bold", hjust=0),
+        panel.background = element_blank(),
+        plot.legend = element_blank()
+        ) +
+    labs(title = "Social <span style = 'color:#7fbf7b;'>Majority</span> vs <span style = 'color:#9586a3;'>Minority</span> in Philadelphia")
+```
+
+```{r social mape}
+st_join(testingmodel.sp.m, acs20) %>% 
+  filter(!is.na(majority)) %>%
+  group_by(majority) %>%
+  summarize(mean.MAPE = scales::percent(mean(SalePrice.APE, na.rm = T))) %>%
+  st_drop_geometry() %>%
+  spread(majority, mean.MAPE) %>%
+  kbl(col.name=c('Majority Tracts','Minority Tracts')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  footnote(general_title = "\n", general = "Table 16")
 ```
