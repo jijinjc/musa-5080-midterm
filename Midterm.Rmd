@@ -2,7 +2,11 @@
 title: "Midterm"
 author: "Jack Chen, Emmanuel Jiang"
 date: "2024-10-04"
-output: html_document
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
 ---
 
 ```{r setup, include=FALSE}
@@ -16,7 +20,6 @@ The purpose of this project is to create a predictive model that leverages compr
 There are particular challenges associated with this exercise. First, the intricacies of the Philadelphia housing market require a nuanced understanding of various local variables, such as neighborhood characteristics, amenities, and spatial structures. Second, the analysis is limited to using Ordinary Least Squares (OLS) regression for the modeling approach, which, while foundational, may not capture complex nonlinear relationships as effectively as other algorithms. Thus, the modeling strategy involves meticulous feature selection and engineering to optimize the predictive power of the OLS regression model.
 
 This report will detail the data gathering methods, present the summary statistics, and explore the correlations among key variables. Additionally, the findings will be visualized through various maps and scatterplots to provide a clear narrative that supports the analytical insights. By the conclusion of this project, the aim is not only to generate accurate predictions but also to foster a deeper understanding of the factors influencing housing prices in Philadelphia, ultimately guiding Zillow in enhancing its market predictions.
-
 
 ```{r library, include=FALSE}
 options(scipen=999)
@@ -45,8 +48,6 @@ library(glue)
 
 root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
 source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
-
-palette5 = c("#25CB10", "#5AB60C", "#8FA108",   "#C48C04", "#FA7800")
 
 get_breaks <- function(sf_object, column_name, num_breaks, breaktype) {
   if (!(column_name %in% colnames(sf_object))) {
@@ -92,12 +93,12 @@ crime = read.csv("https://raw.githubusercontent.com/jijinjc/musa-5080-midterm/re
 |          Includes Garage?          |        incGarage         |
 |        Stories in Building         |         Stories          |
 |                Area                |         maxArea          |
-|        Observable Sceneries        |         scenery          |
 |        **Nearby Amenities**        |                          |
-|       Distance to Hospitals        |      hospitals.d.ft      |
-| Distance to Nearest Farmers Market |                          |
+|     Distance to Nearest Hospital   |      hospitals.d.ft      |
+| Distance to Nearest Farmers Market |    farmersmarket.d.ft    |
+| Distance to Nearest Park           |        parks.d.ft        |
 |           Nearby Schools           |        schools.c         |
-
+|         Nearby Bike Stations       |     bikestations.c       |
 
 ## Data Wrangling
 
@@ -107,7 +108,7 @@ The first step involves loading each dataset corresponding to various amenities,
 
 For the schools dataset, the team filters out institutions affiliated with religious organizations, ensuring a focus on public and charter schools. This is particularly important, as it allows for a broader analysis of schools that serve a diverse population. The bike station dataset is also processed to retain necessary identifiers and spatial information, making it suitable for subsequent analyses.
 
-```{r wrangle data, includ=FALSE}
+```{r wrangle data, warning = FALSE, message = FALSE}
 farmersmarket.f = farmermarket %>%
   select(globalid, name, operator, zip, objectid, geometry)
 hospital.f = hospital %>%
@@ -152,10 +153,6 @@ studentdata.f = studentdata %>%
         incHeater = case_when(
            type_heater == 0 | is.na(type_heater)  ~ "N",
            TRUE~ "Y"),
-        scenery = case_when(
-           view_type == "I" | view_type == "0" | is.na(view_type)   ~ "STANDARD",
-           view_type == "A" | view_type == "B" | view_type == "C" ~ "GOOD",
-           TRUE~ "BELOW AVERAGE"),
         buildingQuality = case_when(
            quality_grade %in% c("3", "4", "5", "6", "A", "A+", "A-", "B", "B+","B-","S","S+","X-")  ~ "Good",
            TRUE~ "Bad")) %>%
@@ -191,11 +188,11 @@ studentdata.f = studentdata.f %>%
 
 The process of splitting the dataset into training and testing subsets is a fundamental step in developing a predictive model. This division serves multiple purposes, primarily aimed at enhancing the model's reliability and generalizability. By segregating the data, the team ensures that the model is trained on one portion while being evaluated on a completely separate portion, which is crucial for assessing the model’s performance on unseen data.
 
-Training the model on a subset of the data allows it to learn the underlying patterns and relationships between the input features and the target variable—in this case, housing prices. This training set is used to optimize the model’s parameters and improve its predictive capabilities. By exposing the model to a diverse range of examples during training, the team can increase the likelihood that it will perform well when applied to new, unseen data.
+[Training the model on a subset of ,he data allows it to learn the underlying patterns and relationships between the input features and the target variable—in this case, housing prices. This training set is used to optimize the model’s parameters and improve its predictive capabilities. By exposing the model to a diverse range of examples during training, the team can increase the likelihood that it will perform well when applied to new, unseen data.] might not need
 
-Additionally, setting a random seed in the data splitting process enhances reproducibility. By fixing the random seed, the team ensures that the same rows are selected for the training and testing sets each time the code is executed. This consistency is vital for validating results and conducting further analyses or iterations of the model, as it allows other researchers or analysts to replicate the findings under the same conditions.
+On a side note, setting a random seed in the data splitting process enhances reproducibility. By fixing the random seed, the team ensures that the same rows are selected for the training and testing sets each time the code is executed. This consistency is vital for validating results and conducting further analyses or iterations of the model, as it allows other researchers or analysts to replicate the findings under the same conditions.
 
-```{r splitting data}
+```{r splitting general data, warning = FALSE, message = FALSE}
 modellingdata = studentdata.f %>%
   filter(toPredict == 'MODELLING') 
 
@@ -212,11 +209,6 @@ trainingmodel = modellingdata[split_index, ]
 testingmodel = modellingdata[-split_index, ] %>%
   select(-sale_price)
 ```
-
-## Moran's I
-
-This section of the code is dedicated to evaluating spatial autocorrelation in the housing price data using Moran's I statistic. Spatial autocorrelation measures the degree to which a variable at one location is correlated with values of the same variable at nearby locations. Understanding this spatial relationship is crucial in housing price analysis, as it can reveal patterns in property values that are influenced by geographical factors.
-
 
 ```{r decide moran/k, include=FALSE, eval=FALSE}
 moran_results = data.frame(K = integer(),
@@ -242,9 +234,13 @@ print(moran_results)
  # K=7
 ```
 
-### NO SPATIAL CHARACTERISTICS (MINORITY + MEDHHINC)
+## Correlation Matrix of Continuous Variables
 
-```{r data summary corrmatrix, }
+The correlation matrix presented illustrates the relationships between various continuous variables related to housing prices in Philadelphia. These variables include sale price, which represents the price at which houses are sold; age, calculated as the difference between the current year and the year built; total rooms (totRooms), indicating the total number of rooms in the house, including bedrooms and bathrooms; and max area (maxArea), which compares the total livable space and total area of the house. Additionally, the matrix displays the distance to farmers markets (farmersmarket.d.ft), the distance to hospitals (hospital.d.ft), the number of schools nearby (schools.c), and the distance to bike stations (bikestations.c).
+
+The correlation coefficients in the matrix range from -1 to 1, where positive values indicate a direct relationship between variables and negative values indicate an inverse relationship. A coefficient close to 1 implies a strong positive correlation, while a coefficient close to -1 indicates a strong negative correlation. This structure provides a clear overview of how different features relate to one another and to the sale price.
+
+```{r data summary corrmatrix, warning = FALSE, message = FALSE}
 corrvars = studentdata.f %>% 
   dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft) %>%
   st_drop_geometry() %>%
@@ -266,20 +262,34 @@ ggcorrplot(
         axis.title.y = element_blank())
 ```
 
-```{r quantile values, include=FALSE}
+Upon examining the correlation matrix, several key relationships stand out. The correlation between sale price and max area appears to be notably positive, suggesting that larger houses tend to command higher prices. This aligns with the general expectation that more space translates to increased value, making it an important feature for predictive modeling.
+
+In contrast, the variable age shows a negative correlation with sale price, indicating that older homes may be priced lower compared to newer constructions. This relationship could be influenced by various factors, including the condition of the property and the desirability of newer builds in the market.
+
+Additionally, the correlation between the total number of rooms and sale price is expectedly positive. A higher number of rooms generally correlates with larger homes, which are typically more appealing to families, further driving up sale prices.
+
+Interestingly, the distances to various amenities—such as farmers' markets, hospitals, and bike stations—do not exhibit strong correlations with sale prices. This could imply that while these factors are important in assessing neighborhood desirability, they may not directly influence pricing in the same manner as the physical attributes of the homes themselves.
+
+```{r quantile values, include=FALSE, warning = FALSE, message = FALSE}
 get_breaks(studentdata.f, 'sale_price', 4, 'quantile')
 get_breaks(studentdata.f, 'maxArea', 4, 'quantile')
 get_breaks(studentdata.f, 'age', 4, 'quantile')
 get_breaks(studentdata.f, 'farmersmarket.d.ft', 4, 'quantile')
 ```
 
-### DATA DELIVERABLES
+[The outputs from the quantile break calculations offer valuable insights into the distribution of key variables affecting housing prices in Philadelphia. The first output shows the quantile breaks for the sale price, with values indicating the distribution of home prices from 0 to 5,990,000, revealing how prices are categorized into intervals. However, a warning about missing values in this variable highlights the potential for incomplete analysis, as these entries were excluded from the calculations. The max area breaks categorize homes based on size, from a minimum of 1 square foot to a maximum of 226,512 square feet, which helps in understanding the relationship between property size and sale prices. Additionally, the age breaks illustrate how homes are distributed by age, with the oldest properties reaching 273 years, indicating trends related to market value over time. Lastly, the distance to farmers markets breaks show the proximity of homes to this amenity, ranging from 78.09 feet to 30,529.72 feet, allowing for an assessment of how access to local resources influences housing prices.] (can)
 
-```{r variable summary dependent map}
+## Dependent variable 
+
+The map below visually represents the distribution of house sale prices across different neighborhoods in Philadelphia, utilizing a color gradient to indicate price ranges. The colors transition from light yellow for lower-priced homes to darker shades of green for higher-priced properties. Specifically, the price categories are defined as follows: homes priced at less than \$137,000 are represented by the lightest yellow shade; those in the range of \$137,000 to \$228,000 are indicated by a lighter green; homes priced between \$228,000 and \$330,000 are shown with a medium green; properties priced from \$330,000 to \$5,990,000 are depicted with a darker green; and homes exceeding \$5,990,000 are represented by the darkest green shade. This color coding facilitates quick visual assessments of the housing market, allowing viewers to easily identify areas with lower or higher property values.
+
+The results illustrated in the map highlight significant spatial variations in housing prices throughout Philadelphia. Areas marked in light yellow indicate regions where homes are priced below \$137,000, which may represent more affordable housing options or potentially underdeveloped neighborhoods. In contrast, the darker green areas, particularly those that exceed \$5,990,000, suggest the presence of high-value properties, likely located in more affluent neighborhoods with desirable amenities, schools, or proximity to city centers.
+
+```{r variable summary dependent map, warning = FALSE, message = FALSE, results='hide'}
 philly = st_read("https://raw.githubusercontent.com/blackmad/neighborhoods/refs/heads/master/philadelphia.geojson") %>%
   st_transform('EPSG:6565')
 
-print(q5(studentdata.f$sale_price))
+#print(q5(studentdata.f$sale_price))
 
 ggplot()+
     geom_sf(data=philly, fill='transparent',color='black', linewidth = 0.1) +
@@ -302,7 +312,17 @@ ggplot()+
   labs(title = "Sale Price of Houses in Philadelphia") 
 ```
 
-```{r Correlation scatter plots}
+The correlation plot visually depicts the relationship between sale price and various continuous variables relevant to the housing market in Philadelphia. Each scatterplot within the grid represents a different variable, including age, number of bike stations nearby (bikestations.c), distance to farmers' markets (farmersmarket.d.ft), distance to hospitals (hospital.d.ft), maximum area of the house (maxArea), distance to parks (parks.d.ft), number of nearby schools (schools.c), and total rooms (totRooms). The horizontal axis of each plot displays the variable value, while the vertical axis represents the corresponding sale price.
+
+The scatterplots illustrate the distribution of data points, with black dots representing individual observations. Each plot includes an orange trend line that indicates the overall direction of the relationship between the variable and sale price. This visual representation allows viewers to quickly assess whether a positive or negative correlation exists between the sale price and each variable.
+
+The findings from the correlation plot reveal several noteworthy relationships. For instance, the scatterplot for max area shows a clear positive correlation with sale price, as indicated by the upward slope of the trend line. This suggests that larger homes tend to sell for higher prices, aligning with general expectations in real estate where property size is a significant factor in determining value.
+
+In contrast, the scatterplots for age, bikestations.c, farmersmarket.d.ft, hospital.d.ft, parks.d.ft, and schools.c show little to no correlation with sale price, as evidenced by the horizontal trend lines. This indicates that, despite the proximity to amenities like bike stations and hospitals, there is no significant impact on the housing prices. This may suggest that factors such as the condition and features of the homes themselves outweigh the influence of these nearby amenities on property values.
+
+The plot for totRooms also demonstrates a positive correlation with sale price, indicating that homes with more rooms are generally priced higher. This finding supports the idea that larger living spaces are more desirable in the housing market.
+
+```{r Correlation scatter plots, warning = FALSE, message = FALSE}
 scattervars = studentdata.f %>% 
   dplyr::select(sale_price, age, totRooms, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft) %>%
   st_drop_geometry() %>%
@@ -324,7 +344,11 @@ ggplot(scattervars, aes(x = value, y = sale_price)) +
   )
 ```
 
-```{r area of house map}
+## Spatial distribution of factors
+
+The spatial analysis of house areas across Philadelphia reveals significant patterns in housing size distribution throughout the city. The data categorizes houses into five distinct area ranges, illustrating that the smallest homes, measuring less than 1114 square feet, are predominantly concentrated in the central and southern regions, suggesting these areas may attract smaller households seeking affordability. In contrast, properties ranging from 1114 to 1422 square feet are scattered throughout the city, indicating a transitional market appealing to families looking for modestly sized homes. Mid-sized homes, between 1422 and 2000 square feet, exhibit a more widespread distribution, reflecting a diverse demographic profile that attracts families and professionals. Larger properties, ranging from 2000 to 226512 square feet, are primarily located in the northern and western parts of Philadelphia, highlighting a socio-economic divide where affluent residents tend to reside. The sparse presence of the largest homes, exceeding 226512 square feet, reinforces the rarity of such expansive properties.
+
+```{r area of house map, warning = FALSE, message = FALSE}
 ggplot()+
     geom_sf(data=philly, fill='transparent',color='black', linewidth = 0.1) +
     geom_sf(data = filter(studentdata.f, maxArea != 'NA'), size=0.75, aes(colour = q5(maxArea))) +
@@ -346,7 +370,9 @@ ggplot()+
   labs(title = "Area of Houses in Philadelphia") 
 ```
 
-```{r age map}
+The spatial analysis of the age of houses in Philadelphia, as illustrated by the accompanying map, reveals important patterns regarding the distribution of residential structures throughout the city. The data categorizes houses into five distinct age ranges, with the legend indicating the years of construction: homes built in the last 73 years are represented in light purple, those constructed between 73 to 98 years ago in light blue, between 98 to 103 years in medium blue, 103 to 273 years in dark blue, and properties older than 273 years in dark green. The map demonstrates that the most recent homes, built within the last 73 years, are concentrated primarily in the northern and eastern parts of Philadelphia. This suggests ongoing urban development and possibly a trend toward newer housing in these areas. Conversely, homes that are older than 273 years are sparse and primarily found in certain neighborhoods, indicating that these areas may retain historical significance or are subject to preservation efforts. The map further reveals that many homes, aged between 98 to 103 years, are located in the central parts of the city, potentially reflecting the urban development patterns characteristic of earlier eras. The presence of properties in the 73 to 98-year range scattered throughout the city highlights a transitional phase in the housing stock.
+
+```{r age map, warning = FALSE, message = FALSE}
 ggplot()+
     geom_sf(data=philly, fill='transparent',color='black', linewidth = 0.1) +
     geom_sf(data = filter(studentdata.f, maxArea != 'NA'), size=0.75, aes(colour = q5(age))) +
@@ -368,7 +394,9 @@ ggplot()+
   labs(title = "Age of Houses in Philadelphia") 
 ```
 
-```{r farmers market map}
+The spatial analysis of houses in relation to their distance from the nearest farmers' market in Philadelphia provides valuable insights into accessibility and neighborhood dynamics. The map categorizes houses into five distance ranges, indicating how far residents are from fresh produce and local goods. The light purple shade represents homes located between 78 and 2553 feet from a farmers' market, suggesting a high level of accessibility to fresh food options in these areas. In contrast, the darker shades of blue and green indicate increasing distances, with properties located more than 30,530 feet away, which are less likely to benefit from immediate access to farmers' markets. Notably, areas with the shortest distances to farmers' markets are concentrated in the central parts of Philadelphia, reflecting urban planning efforts to provide essential services within walking distance. This concentration may foster community engagement and encourage healthier lifestyle choices among residents. Conversely, neighborhoods further from farmers' markets may indicate food deserts, where residents face challenges in accessing fresh produce, potentially impacting their health and well-being.
+
+```{r farmers market map, warning = FALSE, message = FALSE}
 ggplot()+
     geom_sf(data=philly, fill='transparent',color='black', linewidth = 0.1) +
     geom_sf(data = filter(studentdata.f, maxArea != 'NA'), size=0.75, aes(colour = q5(farmersmarket.d.ft))) +
@@ -390,30 +418,25 @@ ggplot()+
   labs(title = "Houses and Their Distance to Nearest Farmers Market in Philadelphia") 
 ```
 
+# Modelling Non Spatial Census Data
 
-```{r splitting data, include=FALSE}
-modellingdata = studentdata.f %>%
-  filter(toPredict == 'MODELLING') 
+## Regression model
 
+The intial regression model presented in Table 1 provide valuable insights into the factors influencing housing prices, as determined by the linear regression analysis. The intercept of the model is estimated at approximately \$290,342, indicating the expected sale price of a house when all predictors are set to zero. This serves as a reference point for interpreting the effects of the other variables included in the model.
 
-challengedata = studentdata.f %>%
-  filter(toPredict == 'CHALLENGE')
+The age of a house negatively impacts its price, with each additional year resulting in a decrease of about \$428 in sale price. This statistically significant relationship suggests that older homes may require more maintenance or may have outdated features, leading to lower market values. Conversely, the total number of rooms in a house is positively associated with its sale price, increasing by approximately \$16,794 for each additional room. This finding underscores the value of larger homes in the housing market.
 
-set.seed(1111) 
-total_features = nrow(modellingdata)
-split_index = sample(1:total_features, size = total_features * 0.6)
+In terms of specific amenities, the presence of air conditioning significantly boosts a home’s value, with an increase of around \$85,192. Similarly, homes classified as having "good" building quality command an additional price of approximately \$116,483, reflecting the high demand for well-constructed properties. However, the inclusion of a basement is associated with a decrease in price of about \$25,035, which may suggest that basements in certain neighborhoods do not add value, possibly due to concerns related to flooding or maintenance issues.
 
+Additionally, the distance to the nearest farmers' market shows a negative relationship with housing prices; specifically, for each foot away from the market, the sale price decreases by approximately \$1.05. This finding emphasizes that proximity to fresh food sources is an important characteristic for homebuyers. The number of schools per acre also negatively impacts prices, with each additional school leading to a decrease of about \$3,813, potentially reflecting concerns about overcrowding or decreased neighborhood appeal.
 
-trainingmodel = modellingdata[split_index, ] 
-testingmodel = modellingdata[-split_index, ] %>%
-  select(-sale_price)
-```
+Distance to hospitals is another critical factor; each foot further from a hospital corresponds to a decrease in sale price of approximately \$3.28, indicating that accessibility to healthcare facilities is a significant consideration for potential buyers. Conversely, the proximity to bike stations has a positive association with home prices, with each additional station increasing the price by around \$31,710, reflecting a growing trend towards active transportation and convenience.
 
-### REGRESSION FOR ALL NON ACS VARIABLES
+Lastly, the distance to parks shows a positive relationship as well, where each additional foot away from a park leads to an increase in home price of approximately \$5.85. This suggests that access to green spaces is an important factor in the desirability of residential properties.
 
-```{r training regression}
+```{r training regression non spatial, warning = FALSE, message = FALSE}
 trReg <- lm(sale_price ~ ., data = trainingmodel %>% st_drop_geometry() %>% 
-                                 dplyr::select(sale_price, age, totRooms, incBasements, incAC, buildingQuality, incGarage, stories, scenery, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft))
+                                 dplyr::select(sale_price, age, totRooms, incBasements, incAC, buildingQuality, incGarage, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft))
 
 trRegSummary <- summary(trReg)
 coTable <- as.data.frame(trRegSummary$coefficients)
@@ -432,9 +455,9 @@ coTable %>%
   footnote(general_title = "\n", general = "Table 1")
 ```
 
-### MAE AND MAPE FOR NO ACS VALUE (GENERALIZATION)
+Using the baseline model, the sale price by dividing the data into training and testing sets. It is then computed the Mean Absolute Error (MAE) and Mean Absolute Percentage Error (MAPE) for the testing set. Currently, the MAE is 81305, while the MAPE stands at 35.5%.
 
-```{r regression of training model}
+```{r regression of non spatial training model, warning = FALSE, message = FALSE}
 trainingReg <- lm(sale_price ~ ., data = trainingmodel %>% 
                     st_drop_geometry() %>% 
                     dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft))
@@ -456,9 +479,13 @@ trainingmodel.m %>%
   footnote(general_title = "\n", general = "Table 2")  
 ```
 
-### SPATIALAUTOCORRELATION AND MORAN'S I FOR NO ACS VALUES 
+Since a baseline regression model to predict sale prices provides only a partial understanding of property values, as these values are intricately tied to their geographic locations within the city. Properties situated near one another tend to exhibit similar characteristics influenced by neighborhood amenities, socioeconomic conditions, and infrastructure development. To explore this relationship further, the analysis examines the correlation of sale prices among properties in close proximity.
 
-```{r moran's test}
+A spatial weight matrix was constructed to relate each sale price to those of its five nearest neighbors. Subsequently, Moran's I was computed under the null hypothesis that sale prices are randomly distributed across the area. The accompanying figure illustrates the frequency distribution of 999 randomly permuted Moran's I values generated through a Monte Carlo simulation. This visualization indicates that the observed Moran's I significantly exceeds all randomly generated values.
+
+This finding validates the presence of spatial autocorrelation, suggesting that the sale prices of properties are not randomly distributed but instead exhibit clustering patterns. Such insights are crucial for understanding how location affects property values and can inform future analyses and decision-making processes regarding urban development and real estate investments. 
+
+```{r morans test, warning = FALSE, message = FALSE}
 coords.test <-  st_coordinates(trainingmodel.m) 
 neighborList.test <- knn2nb(knearneigh(coords.test, 7))
 spatialWeights.test <- nb2listw(neighborList.test, style="W")
@@ -467,7 +494,9 @@ moranTest <- moran.mc(trainingmodel.m$SalePrice.Error,
                       spatialWeights.test, nsim = 999)
 ```
 
-```{r moran's plot}
+
+
+```{r morans plot, warning = FALSE, message = FALSE}
 ggplot(as.data.frame(moranTest$res[c(1:999)]), aes(moranTest$res[c(1:999)])) +
   geom_histogram(binwidth = 0.01, fill = "#48913c") +
   geom_vline(aes(xintercept = moranTest$statistic), colour = "#9586a3" ,size=1) +
@@ -483,9 +512,9 @@ ggplot(as.data.frame(moranTest$res[c(1:999)]), aes(moranTest$res[c(1:999)])) +
        y = "Count")
 ```
 
-### CROSS VALIDATION FOR NON SPATIAL GENERALIZATION VARIABLES
+By conducting 100 iterations of cross-validation, the MAE is 95665.4, while the variability stands at 9258.774.
 
-```{r cross validation non spatial}
+```{r cross validation non spatial, warning = FALSE, message = FALSE}
 fitControl = trainControl(method = "cv", number = 100)
 
 cvReg = 
@@ -501,13 +530,14 @@ cvReg$resample %>%
   footnote(general_title = "\n", general = "Table 3")
 ```
 
-# Adding Census Data and neighborhood 
+# Adding Census Data and Neighborhood
+Consider the sale price might be related tot the spatial distributuion of the houses, Census data is add to the existing model.
 
 ```{r census key, include=FALSE, eval=FALSE}
 census_api_key("0e028dfcee38f844e89c39d01870f6a964f675a2", overwrite = TRUE, install = TRUE)
 ```
 
-```{r adding spatial features}
+```{r adding spatial features, warning = FALSE, message = FALSE, results='hide'}
 #district = st_read("https://raw.githubusercontent.com/jijinjc/musa-5080-midterm/refs/heads/main/Midterm%20Data/Council_Districts_2024.geojson") %>%
   #st_transform("EPSG:6565")
 
@@ -559,7 +589,7 @@ studentdata.sp = studentdata.sp %>%
   left_join(joinHHinc, by = "parcel_number") 
 ```
 
-```{r split spatial}
+```{r split spatial, warning = FALSE, message = FALSE}
 modellingdata.sp = studentdata.sp %>%
   filter(toPredict == 'MODELLING') 
 
@@ -579,11 +609,11 @@ testingmodel.sp = modellingdata.sp[-split_index, ]
   #select(-sale_price)
 ```
 
-### REGRESSION FOR ALL VARIABLE INCLUDING ACS
+A new regression model with the Census indicators is listed below. All indicators show We built a new regression of the model with these indicators and obtained the following results. All indicators show statistically significant correlations with house sale prices at the 95% level, except for the presence of a basement and the distance to the nearest hospital. Adjusted R-squared is 0.507, indicating that the model can explain 50.7% of variations in sale price. 
 
-```{r spatial table}
+```{r spatial table, warning = FALSE, message = FALSE}
 reg2 <- lm(sale_price ~ ., data = studentdata.sp %>% st_drop_geometry() %>% 
-                                 dplyr::select(sale_price, age, totRooms, incBasements, incAC, buildingQuality, incGarage, stories, scenery, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft, minority.m, medHHInc, DIST_NAME))
+                                 dplyr::select(sale_price, age, totRooms, incBasements, incAC, buildingQuality, incGarage, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft, minority.m, medHHInc, DIST_NAME))
 summary_reg2 <- summary(reg2)
 coefficients_table <- as.data.frame(summary_reg2$coefficients)
 
@@ -602,11 +632,7 @@ coefficients_table %>%
   footnote(general_title = "\n", general = "Table 4")
 ```
 
-
-
-### R AND F TABLE FOR ALL VARIABLES
-
-```{r}
+```{r rval table, warning = FALSE, message = FALSE}
 reg2.sumtable <- data.frame(
   Statistic = c("Multiple R-squared", "Adjusted R-squared", "F-statistic"),
   Value = c(
@@ -622,9 +648,9 @@ reg2.sumtable %>%
   footnote(general_title = "\n", general = "Table 5")
 ```
 
-### MAE AND MAPE FOR ALL VARS
+Then apply the Mean Absolute Error (MAE) and Mean Absolute Percentage Error (MAPE) for the testing set. Resulting in the MAE is 74013.52, while the MAPE stands at 34.19%.
 
-```{r MAE/MAPE of training model for spatial}
+```{r MAE/MAPE of training model for spatial, warning = FALSE, message = FALSE}
 trainingReg.sp <- lm(sale_price ~ ., na.action = na.omit, data = trainingmodel.sp %>% 
                       st_drop_geometry() %>% 
                     dplyr::select(sale_price, age, totRooms, incBasements, incAC, incGarage, buildingQuality, stories, maxArea, farmersmarket.d.ft, schools.c, hospital.d.ft, bikestations.c, parks.d.ft, minority.m, medHHInc, DIST_NAME))
@@ -647,9 +673,7 @@ testingmodel.sp.m %>%
 
 ```
 
-### MORANS I FOR CENSUS AND SPATIAL
-
-```{r}
+```{r morans i spatial, warning = FALSE, message = FALSE}
 testing.coords <-  st_coordinates(testingmodel.sp.m) 
 testing.tracts <- knn2nb(knearneigh(testing.coords, 5))
 spatialWeights.test_n <- nb2listw(testing.tracts, style="W")
@@ -672,9 +696,9 @@ ggplot(as.data.frame(moranTest_n$res[c(1:999)]), aes(moranTest_n$res[c(1:999)]))
 
 ```
 
-### PRICES AS A FUNCTION OF OBSERVED PRICE
+The predicted prices as a function of observed sale prices is then plotted below. The turquoise line represents a would-be perfect fit, while the dark green line represents the predicted fit. It is demonstrate that with the addition of the Census data, the model does a pretty satisfying job at predicting the sale price, perhaps by explaining part of the spatial process and local amenities.
 
-```{r price func of observed price}
+```{r price func of observed price, warning = FALSE, message = FALSE}
 testingmodel.sp.m %>%
   dplyr::select(SalePrice.Predict, sale_price) %>%
   ggplot(aes(sale_price, SalePrice.Predict)) +
@@ -695,9 +719,7 @@ testingmodel.sp.m %>%
        y = "Predict Price")
 ```
 
-### SALE PRICE ERROR MAP
-
-```{r sale price error map }
+```{r sale price error map, warning = FALSE, message = FALSE}
 saleError.T = testingmodel.sp.m %>%
   mutate(SalePrice.Error.Cat = cut(SalePrice.Error, 
                                    breaks = c(-Inf, -75000, -1000, 1000, 75000, Inf), 
@@ -723,7 +745,7 @@ ggplot()+
   labs(title = "Sale Price Error of Testing Set") 
 ```
 
-```{r}
+```{r sale and lag price, warning = FALSE, message = FALSE}
 #testingmodel.sp.m <- testingmodel.sp.m[is.finite(testingmodel.sp.m$SalePrice.Error), ]
 testingmodel.sp.m$SalePrice.Error[!is.finite(testingmodel.sp.m$SalePrice.Error)] = mean(testingmodel.sp.m$SalePrice.Error, na.rm = TRUE)
 
@@ -743,7 +765,8 @@ theme(plot.subtitle = element_text(size = 9,face = "italic"),
         axis.text.y=element_text(size=6), 
         axis.title=element_text(size=8))
 ```
-```{r cross validation for spatial}
+
+```{r cross validation for spatial, warning = FALSE, message = FALSE}
 fitControl <- trainControl(method = "cv", number = 100)
 set.seed(1111)
 
@@ -760,7 +783,7 @@ cvReg.sp$resample %>%
   footnote(general_title = "\n", general = "Table 7")
 ```
 
-```{r distribution of MAE histogram}
+```{r distribution of MAE histogram, warning = FALSE, message = FALSE}
 cvReg.sp$resample %>% 
 ggplot(aes(x=cvReg.sp$resample[,3])) +
     geom_histogram( fill="#006d2c", color="#e9ecef") + 
@@ -775,9 +798,9 @@ theme(plot.subtitle = element_text(size = 9,face = "italic"),
         axis.title=element_text(size=8))
 ```
 
-In the end, our model predicted sale prices according to the map below in Philadelphia. There are some 
+In the end, our model predicted sale prices according to the map below in Philadelphia. We can see that in general, many of the price predictions are clustered, with each clusters likely having a few sale prices that are different with its surrounding sales.
 
-```{r all value prediction}
+```{r all value prediction, warning = FALSE, message = FALSE}
 finalPrediction <- studentdata.sp %>% 
   mutate(prediction = predict(trainingReg.sp, studentdata.sp)) %>%
   mutate(prediction_class = cut(prediction, breaks = c(0, 250000, 500000, 750000, 1000000, max(prediction, na.rm=TRUE))))
@@ -801,7 +824,7 @@ ggplot()+
 
 Looking at the mean absolute percentage error of the tracts in Philadelphia, we actually see that a majority of the tracts and neighborhoods that we looked at fall around a 0.25 MAPE, showing that in general the error of prediction in those areas are not exceptionally high. There is, however, a few tracts within the region that we found there to be high MAPE, indicating that while the accuracy of the model is relatively consistent across a majority of the region, there are still several regions that it is unable to produce an especially accurate prediction.
 
-```{r MAPE map}
+```{r MAPE map, warning = FALSE, message = FALSE}
 mapePlot = st_intersection(testingmodel.sp.m, philly %>% select(name)) %>% 
   st_drop_geometry() %>% 
   group_by(name) %>%
@@ -851,9 +874,9 @@ testingmodel.phl %>%
         axis.title=element_text(size=8))
 ```
 
-Finally, for a generalization check, we are looking at the social minority and majority in Philadelphia. Despite the fact that the model yields a 26% for social majority tracts and 4% for social minority tracts, the model is unfortunately unable to provide highly general results for neither social majority nor minority tracts. 
+Finally, for a generalization check, we are looking at the social minority and majority in Philadelphia. Despite the fact that the model yields a 26% for social majority tracts and 4% for social minority tracts, the model is unfortunately unable to provide highly general results for neither social majority nor minority tracts.
 
-```{r generalization}
+```{r generalization, warning = FALSE, message = FALSE}
 ggplot() + geom_sf(data = na.omit(acs20), aes(fill = majority), color = NA) +
     scale_fill_manual(values = c("#7fbf7b", "#9586a3")) +
     geom_sf(data=philly, fill='transparent',color='black') +
@@ -870,7 +893,7 @@ ggplot() + geom_sf(data = na.omit(acs20), aes(fill = majority), color = NA) +
     labs(title = "Social <span style = 'color:#7fbf7b;'>Majority</span> vs <span style = 'color:#9586a3;'>Minority</span> in Philadelphia")
 ```
 
-```{r social mape}
+```{r social mape, warning = FALSE, message = FALSE}
 st_join(testingmodel.sp.m, acs20) %>% 
   filter(!is.na(majority)) %>%
   group_by(majority) %>%
@@ -879,5 +902,21 @@ st_join(testingmodel.sp.m, acs20) %>%
   spread(majority, mean.MAPE) %>%
   kbl(col.name=c('Majority Tracts','Minority Tracts')) %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
-  footnote(general_title = "\n", general = "Table 16")
+  footnote(general_title = "\n", general = "Table 8")
 ```
+
+#Discussion 
+This model effectively predicts most housing prices, although a few exceptions—likely attributable to extreme values and the inherent randomness within the data—are noted.
+
+The analysis explored various variables to understand the spatial correlations between local amenities and housing prices, particularly the distance to nearby schools. The model identified that property size significantly influences sale prices, as illustrated in the data section, where the maximum area shows the highest positive correlation with sale price among all factors. This finding aligns with common trends observed in urban real estate markets, indicating that property size is a dominant factor affecting housing prices.
+
+Overall, the predictors in the model account for approximately 50% of the variations in housing prices, with R-squared values hovering around 0.5. Furthermore, the spatial clustering of high-priced homes within the city center is evident, indicating that desirable locations contribute to increased property values.
+
+One notable observation is the existence of a housing unit with an age exceeding 500 years, which may be viewed as either a failure of model fitting or an extreme value in the dataset. Both the baseline regression and neighborhood effects models exhibit a relatively high Mean Absolute Percentage Error (MAPE) of about 39%, prompting the removal of outlier data to enhance prediction accuracy.
+
+It is important to highlight that this model pays relatively less attention to safety factors, such as crime rates. This oversight could diminish the model's generalizability, as local crime rates are significant determinants influencing potential buyers' willingness to purchase properties, particularly for families with children. Future iterations of the model should consider incorporating safety indicators to provide a more comprehensive understanding of the factors affecting housing prices in Philadelphia.
+
+#Conclusion 
+In summary, this model is effectively predicting the Philadelphia housing price in a certain context. leveraging a comprehensive dataset that includes various local amenities and property characteristics. The analysis highlighted the significant impact of property size on sale prices, reaffirming the common understanding that larger homes typically command higher market values. The model's ability to account for approximately 50% of the variance in housing prices indicates a understanding of the key factors (the housing internal charateristcs, spatial location and certain nearby facilities) influencing the market.
+
+However, certain limitations were identified, including the presence of outliers, such as properties with extreme ages, which can skew predictions and affect overall accuracy. The model's performance is also characterized by a relatively high Mean Absolute Percentage Error, suggesting that while it performs well, there is still room for improvement in its predictive capabilities. Furthermore, the omission of safety factors, such as crime rates, may limit the model's generalizability and applicability, particularly for families who prioritize neighborhood safety when considering property purchases.
